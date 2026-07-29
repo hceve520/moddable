@@ -95,8 +95,25 @@ declare module "commodetto/outline" {
 declare module "commodetto/Poco" {
   import {Outline} from "commodetto/outline"
 
+  interface LinearGradientStop {
+    offset: number
+    r?: number
+    g?: number
+    b?: number
+    color?: number
+  }
+
+  interface LinearGradient {
+    x0: number
+    y0: number
+    x1: number
+    y1: number
+    stops: Array<LinearGradientStop>
+  }
+
   interface PocoPrototype {
-    blendOutline(color: number, blend: number, outline: Outline, x?: number, y?: number): void
+    blendOutline(colorOrGradient: number | LinearGradient, blend: number, outline: Outline, x?: number, y?: number): void
     blendPolygon(color: number, blend: number, ...points: Array<number>): void
+    makeLinearGradient(x0: number, y0: number, x1: number, y1: number, stops: Array<LinearGradientStop>): LinearGradient
   }
 }

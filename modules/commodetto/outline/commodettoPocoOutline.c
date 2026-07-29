@@ -31,6 +31,9 @@ static void doOutline(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension 
 static void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, PocoDimension h, uint8_t xphase);
 static void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user);
 static void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user);
+static void outlineFillCommon(Poco poco, uint8_t paintKind, PocoColor color, const PocoLinearGradientRecord *gradient, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy);
+
+void PocoLinearGradientFromSlot(xsMachine *the, xsSlot *slot, PocoLinearGradient gradient);
 
 static xsOutlineRenderer gxOutlineRenderer = NULL;
 
@@ -54,7 +57,13 @@ typedef struct {
 	PocoCoordinate dx;
 	PocoPixel color;
 	uint8_t blend;
+	uint8_t paintKind;
+	PocoLinearGradientRecord gradient;
 } xsOutlineRenderRecord, *xsOutlineRender;
+
+#if defined(__GNUC__) || defined(__clang__)
+_Static_assert(sizeof(xsOutlineRenderRecord) <= 255, "outline render record exceeds PocoDrawExternal limit");
+#endif
 
 void bufferToFTOutline(void *buffer, struct FT_Outline_ *outline)
 {
@@ -65,11 +74,251 @@ void bufferToFTOutline(void *buffer, struct FT_Outline_ *outline)
 	outline->contours = (short *)(((unsigned char *)outline->points) + ((outline->n_points << 1) * 4));
 	outline->tags = ((char *)outline->contours) + (outline->n_contours * 2);
 	outline->flags = header->flags;
+}
 
-//	int i;
-//	printf("READ n_points %d, n_contours %d\n", (int)outline->n_points, (int)outline->n_contours);
-//	for (i = 0; i < outline->n_points; i++)
-//		printf("x %f, y %f, tag %d\n", (double)outline->points[i].x / 64, (double)outline->points[i].y / 64, (int)outline->tags[i]);
+void PocoLinearGradientPrepare(PocoLinearGradient gradient)
+{
+	if (gradient->flags & kPocoGradientFlagAngular) {
+		gradient->adx = 0;
+		gradient->ady = 0;
+		gradient->len2 = 1;	/* non-zero so single-stop short-circuit still works via stopCount */
+		return;
+	}
+	gradient->adx = (int32_t)gradient->x1 - (int32_t)gradient->x0;
+	gradient->ady = (int32_t)gradient->y1 - (int32_t)gradient->y0;
+	gradient->len2 = (uint32_t)(gradient->adx * gradient->adx + gradient->ady * gradient->ady);
+	gradient->flags &= (uint8_t)~(kPocoGradientFlagVertical | kPocoGradientFlagHorizontal);
+	if (0 == gradient->adx)
+		gradient->flags |= kPocoGradientFlagVertical;
+	if (0 == gradient->ady)
+		gradient->flags |= kPocoGradientFlagHorizontal;
+}
+
+static void PocoGradientShadeFromT(const PocoLinearGradientRecord *gradient, uint32_t t, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+	int i;
+
+	if (t <= gradient->stops[0].offset) {
+		*r = gradient->stops[0].r;
+		*g = gradient->stops[0].g;
+		*b = gradient->stops[0].b;
+		return;
+	}
+
+	for (i = 1; i < gradient->stopCount; i++) {
+		if (t <= gradient->stops[i].offset) {
+			uint8_t o0 = gradient->stops[i - 1].offset;
+			uint8_t o1 = gradient->stops[i].offset;
+			uint32_t span = (uint32_t)(o1 - o0);
+			uint32_t f = span ? (((t - o0) << 8) / span) : 0;
+			int32_t r0 = gradient->stops[i - 1].r;
+			int32_t g0 = gradient->stops[i - 1].g;
+			int32_t b0 = gradient->stops[i - 1].b;
+			*r = (uint8_t)(r0 + ((((int32_t)gradient->stops[i].r - r0) * (int32_t)f) >> 8));
+			*g = (uint8_t)(g0 + ((((int32_t)gradient->stops[i].g - g0) * (int32_t)f) >> 8));
+			*b = (uint8_t)(b0 + ((((int32_t)gradient->stops[i].b - b0) * (int32_t)f) >> 8));
+			return;
+		}
+	}
+
+	i = gradient->stopCount - 1;
+	*r = gradient->stops[i].r;
+	*g = gradient->stops[i].g;
+	*b = gradient->stops[i].b;
+}
+
+static void PocoLinearGradientSampleRGB(const PocoLinearGradientRecord *gradient, int x, int y, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+	uint32_t t;
+
+	if (0 == gradient->stopCount) {
+		*r = *g = *b = 0;
+		return;
+	}
+
+	if (1 == gradient->stopCount) {
+		*r = gradient->stops[0].r;
+		*g = gradient->stops[0].g;
+		*b = gradient->stops[0].b;
+		return;
+	}
+
+	if (gradient->flags & kPocoGradientFlagAngular) {
+		double ang = c_atan2((double)(y - gradient->y0), (double)(x - gradient->x0));
+		double rel = ang - (double)gradient->startAngle;
+		double sweep = (double)gradient->sweepAngle;
+		if (sweep < 0)
+			sweep = -sweep;
+		while (rel < 0)
+			rel += 2 * C_M_PI;
+		while (rel >= 2 * C_M_PI)
+			rel -= 2 * C_M_PI;
+		if (sweep <= 0)
+			t = 0;
+		else if (rel > sweep)
+			t = (rel - sweep < (2 * C_M_PI - rel)) ? 255 : 0;
+		else
+			t = (uint32_t)((rel / sweep) * 255.0 + 0.5);
+		if (t > 255)
+			t = 255;
+		PocoGradientShadeFromT(gradient, t, r, g, b);
+		return;
+	}
+
+	if (0 == gradient->len2) {
+		*r = gradient->stops[0].r;
+		*g = gradient->stops[0].g;
+		*b = gradient->stops[0].b;
+		return;
+	}
+
+	{
+		int64_t num = (int64_t)(x - gradient->x0) * gradient->adx + (int64_t)(y - gradient->y0) * gradient->ady;
+		if (num <= 0)
+			t = 0;
+		else if (num >= (int64_t)gradient->len2)
+			t = 255;
+		else
+			t = (uint32_t)((num * 255) / gradient->len2);
+	}
+
+	PocoGradientShadeFromT(gradient, t, r, g, b);
+}
+
+PocoPixel PocoLinearGradientSamplePixel(const PocoLinearGradientRecord *gradient, int x, int y)
+{
+	uint8_t r, g, b;
+	PocoLinearGradientSampleRGB(gradient, x, y, &r, &g, &b);
+	return PocoMakeColor((Poco)NULL, r, g, b);
+}
+
+static void unpackPocoPixelRGB(PocoPixel color, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+#if kCommodettoBitmapRGB565LE == kPocoPixelFormat
+	*r = (uint8_t)(((color >> 11) & 0x1F) * 255 / 31);
+	*g = (uint8_t)(((color >> 5) & 0x3F) * 255 / 63);
+	*b = (uint8_t)((color & 0x1F) * 255 / 31);
+#elif kCommodettoBitmapRGB565BE == kPocoPixelFormat
+	{
+		uint16_t c = commodetto_bswap16(color);
+		*r = (uint8_t)(((c >> 11) & 0x1F) * 255 / 31);
+		*g = (uint8_t)(((c >> 5) & 0x3F) * 255 / 63);
+		*b = (uint8_t)((c & 0x1F) * 255 / 31);
+	}
+#elif (kCommodettoBitmapGray16 == kPocoPixelFormat) || (kCommodettoBitmapGray256 == kPocoPixelFormat)
+	*r = *g = *b = (uint8_t)color;
+#else
+	*r = *g = *b = 0;
+#endif
+}
+
+void PocoLinearGradientFromSlot(xsMachine *the, xsSlot *slot, PocoLinearGradient gradient)
+{
+	int i, j, count;
+	uint8_t angular = 0;
+
+	c_memset(gradient, 0, sizeof(PocoLinearGradientRecord));
+
+	xsmcVars(3);
+
+	if (xsmcHas(*slot, xsID_type)) {
+		char *type;
+		xsmcGet(xsVar(0), *slot, xsID_type);
+		type = xsmcToString(xsVar(0));
+		if ((0 == c_strcmp(type, "angular")) || (0 == c_strcmp(type, "conic")))
+			angular = 1;
+	}
+	else if (xsmcHas(*slot, xsID_cx) && xsmcHas(*slot, xsID_startAngle))
+		angular = 1;
+
+	if (angular) {
+		xsmcGet(xsVar(0), *slot, xsID_cx);
+		gradient->x0 = (int16_t)xsmcToInteger(xsVar(0));
+		xsmcGet(xsVar(0), *slot, xsID_cy);
+		gradient->y0 = (int16_t)xsmcToInteger(xsVar(0));
+		xsmcGet(xsVar(0), *slot, xsID_startAngle);
+		gradient->startAngle = (float)xsmcToNumber(xsVar(0));
+		if (xsmcHas(*slot, xsID_sweepAngle)) {
+			xsmcGet(xsVar(0), *slot, xsID_sweepAngle);
+			gradient->sweepAngle = (float)xsmcToNumber(xsVar(0));
+		}
+		else {
+			xsmcGet(xsVar(0), *slot, xsID_endAngle);
+			gradient->sweepAngle = (float)xsmcToNumber(xsVar(0)) - gradient->startAngle;
+		}
+		gradient->flags = kPocoGradientFlagAngular;
+	}
+	else {
+		xsmcGet(xsVar(0), *slot, xsID_x0);
+		gradient->x0 = (int16_t)xsmcToInteger(xsVar(0));
+		xsmcGet(xsVar(0), *slot, xsID_y0);
+		gradient->y0 = (int16_t)xsmcToInteger(xsVar(0));
+		xsmcGet(xsVar(0), *slot, xsID_x1);
+		gradient->x1 = (int16_t)xsmcToInteger(xsVar(0));
+		xsmcGet(xsVar(0), *slot, xsID_y1);
+		gradient->y1 = (int16_t)xsmcToInteger(xsVar(0));
+	}
+
+	xsmcGet(xsVar(0), *slot, xsID_stops);
+	xsmcGet(xsVar(1), xsVar(0), xsID_length);
+	count = xsmcToInteger(xsVar(1));
+	if (count < 1)
+		xsUnknownError("gradient needs stops");
+	if (count > kPocoLinearGradientMaxStops)
+		count = kPocoLinearGradientMaxStops;
+
+	for (i = 0; i < count; i++) {
+		double offset;
+		uint8_t r = 0, g = 0, b = 0;
+
+		xsmcGetIndex(xsVar(1), xsVar(0), i);
+
+		xsmcGet(xsVar(2), xsVar(1), xsID_offset);
+		offset = xsmcToNumber(xsVar(2));
+		if (offset < 0)
+			offset = 0;
+		else if (offset > 1)
+			offset = 1;
+		gradient->stops[i].offset = (uint8_t)(offset * 255 + 0.5);
+
+		if (xsmcHas(xsVar(1), xsID_r)) {
+			xsmcGet(xsVar(2), xsVar(1), xsID_r);
+			r = (uint8_t)xsmcToInteger(xsVar(2));
+			xsmcGet(xsVar(2), xsVar(1), xsID_g);
+			g = (uint8_t)xsmcToInteger(xsVar(2));
+			xsmcGet(xsVar(2), xsVar(1), xsID_b);
+			b = (uint8_t)xsmcToInteger(xsVar(2));
+		}
+		else {
+			PocoPixel color;
+			xsmcGet(xsVar(2), xsVar(1), xsID_color);
+			color = (PocoPixel)xsmcToInteger(xsVar(2));
+			unpackPocoPixelRGB(color, &r, &g, &b);
+		}
+		gradient->stops[i].r = r;
+		gradient->stops[i].g = g;
+		gradient->stops[i].b = b;
+	}
+
+	/* insertion-sort stops by offset */
+	for (i = 1; i < count; i++) {
+		uint8_t o = gradient->stops[i].offset;
+		uint8_t rr = gradient->stops[i].r;
+		uint8_t gg = gradient->stops[i].g;
+		uint8_t bb = gradient->stops[i].b;
+		j = i - 1;
+		while ((j >= 0) && (gradient->stops[j].offset > o)) {
+			gradient->stops[j + 1] = gradient->stops[j];
+			j -= 1;
+		}
+		gradient->stops[j + 1].offset = o;
+		gradient->stops[j + 1].r = rr;
+		gradient->stops[j + 1].g = gg;
+		gradient->stops[j + 1].b = bb;
+	}
+
+	gradient->stopCount = (uint8_t)count;
+	PocoLinearGradientPrepare(gradient);
 }
 
 void xs_outlinerenderer_blendOutline(xsMachine *the)
@@ -79,10 +328,21 @@ void xs_outlinerenderer_blendOutline(xsMachine *the)
 	PocoOutline buffer = (PocoOutline)xsmcGetHostData(xsArg(2));
 	xsOutlineRenderRecord orr;
 	PocoCoordinate xMax, yMax, dx, dy;
+	xsType paintType;
 
 	orr.or = or;
-	orr.color = (PocoPixel)xsmcToInteger(xsArg(0));
 	orr.blend = (uint8_t)xsmcToInteger(xsArg(1));
+	paintType = xsmcTypeOf(xsArg(0));
+	if ((xsIntegerType == paintType) || (xsNumberType == paintType)) {
+		orr.paintKind = kPocoPaintSolid;
+		orr.color = (PocoPixel)xsmcToInteger(xsArg(0));
+	}
+	else {
+		orr.paintKind = kPocoPaintLinearGradient;
+		orr.color = 0;
+		PocoLinearGradientFromSlot(the, &xsArg(0), &orr.gradient);
+	}
+
 	if (xsmcArgc >= 4) {
 		dx = xsmcToInteger(xsArg(3));
 		dy = xsmcToInteger(xsArg(4));
@@ -155,6 +415,8 @@ typedef struct {
 	PocoCoordinate	y;
 	PocoPixel 		color;
 	uint8_t 		blend;
+	uint8_t			paintKind;
+	PocoLinearGradientRecord gradient;
 #if 4 == kPocoPixelSize
 	uint8_t 		xphase;
 #endif
@@ -172,14 +434,17 @@ void doOutline(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	os.y = orr->y;
 	os.color = orr->color;
 	os.blend = orr->blend;
+	os.paintKind = orr->paintKind;
+	if (kPocoPaintLinearGradient == orr->paintKind)
+		os.gradient = orr->gradient;
 #if 4 == kPocoPixelSize
 	os.xphase = xphase;
 #endif
 
 	or->params.user = &os;
-	or->params.clip_box.xMin = orr->x; //poco->x - orr->dx;
+	or->params.clip_box.xMin = orr->x;
 	or->params.clip_box.yMin = orr->y;
-	or->params.clip_box.xMax = or->params.clip_box.xMin + w; //poco->w;
+	or->params.clip_box.xMax = or->params.clip_box.xMin + w;
 	or->params.clip_box.yMax = or->params.clip_box.yMin + h;
 
 	or->params.source = &orr->outline;
@@ -293,7 +558,7 @@ void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
     	.points = (FT_Vector *)prr->points,
     	.tags = (char *)gPolygonFlags,
     	.contours = &prr->n_points,
-    	.flags = FT_OUTLINE_NONE,		// FT_OUTLINE_EVEN_ODD_FILL
+    	.flags = FT_OUTLINE_NONE,
 	};
 
 	os.dst = dst;
@@ -302,6 +567,7 @@ void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	os.y = prr->y;
 	os.color = prr->color;
 	os.blend = prr->blend;
+	os.paintKind = kPocoPaintSolid;
 #if 4 == kPocoPixelSize
 	os.xphase = xphase;
 #endif
@@ -320,113 +586,196 @@ void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	prr->y += h;
 }
 
-#if 0
-void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
+#if kCommodettoBitmapRGB565LE == kPocoPixelFormat
+
+static void blendPixelRGB565LE(PocoPixel *p, PocoPixel color, uint8_t blend5)
 {
-	xsOutlineSpan os = user;
-	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
+	int src32, dst;
 
-	do {
-		uint16_t len = spans->len;
-		PocoPixel *p = pixels + (spans->x - os->x);
-		uint16_t c = spans->coverage >> 3;
-		uint16_t pixel = (c << 11) | (c << 6) | c;
+	if (31 == blend5) {
+		*p = color;
+		return;
+	}
 
-		while (len--)
-			*p++ = pixel;
-
-		spans++;
-	} while (--count);
-}
-
-#elif kCommodettoBitmapRGB565LE == kPocoPixelFormat
-
-void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
-{
-	xsOutlineSpan os = user;
-	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	int src32 = os->color;
+	src32 = color;
 	src32 |= src32 << 16;
 	src32 &= 0x07E0F81F;
+	dst = *p;
+	dst |= dst << 16;
+	dst &= 0x07E0F81F;
+	src32 = src32 - dst;
+	dst = blend5 * src32 + (dst << 5) - dst;
+	dst += 0x02008010;
+	dst += (dst >> 5) & 0x07E0F81F;
+	dst >>= 5;
+	dst &= 0x07E0F81F;
+	dst |= dst >> 16;
+	*p = (PocoPixel)dst;
+}
 
-	pixels -= os->x;
-	do {
-		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
-		uint8_t blend = spans->coverage;
+void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
+{
+	xsOutlineSpan os = user;
+	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
 
-		if (255 == blend) {
-			uint16_t pixel = os->color;
-			while (len--)
-				*p++ = pixel;
+	if (kPocoPaintLinearGradient == os->paintKind) {
+		PocoPixel rowColor = 0;
+		uint8_t haveRowColor = 0;
+		if (os->gradient.flags & kPocoGradientFlagVertical) {
+			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
+			haveRowColor = 1;
 		}
-		else {
-			blend >>= 3;
-
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			int x = spans->x;
+			PocoPixel *p = pixels + x;
+			uint8_t blend = spans->coverage >> 3;
 			while (len--) {
-				int	dst, src;
-
-				dst = *p;
-				dst |= dst << 16;
-				dst &= 0x07E0F81F;
-				src = src32 - dst;
-				dst = blend * src + (dst << 5) - dst;
-				dst += 0x02008010;
-				dst += (dst >> 5) & 0x07E0F81F;
-				dst >>= 5;
-				dst &= 0x07E0F81F;
-				dst |= dst >> 16;
-				*p++ = (PocoPixel)dst;
+				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				blendPixelRGB565LE(p++, color, (255 == spans->coverage) ? 31 : blend);
+				x += 1;
 			}
-		}
+			spans++;
+		} while (--count);
+		return;
+	}
 
-		spans++;
-	} while (--count);
+	{
+		int src32 = os->color;
+		src32 |= src32 << 16;
+		src32 &= 0x07E0F81F;
+
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			PocoPixel *p = pixels + spans->x;
+			uint8_t blend = spans->coverage;
+
+			if (255 == blend) {
+				uint16_t pixel = os->color;
+				while (len--)
+					*p++ = pixel;
+			}
+			else {
+				blend >>= 3;
+
+				while (len--) {
+					int	dst, src;
+
+					dst = *p;
+					dst |= dst << 16;
+					dst &= 0x07E0F81F;
+					src = src32 - dst;
+					dst = blend * src + (dst << 5) - dst;
+					dst += 0x02008010;
+					dst += (dst >> 5) & 0x07E0F81F;
+					dst >>= 5;
+					dst &= 0x07E0F81F;
+					dst |= dst >> 16;
+					*p++ = (PocoPixel)dst;
+				}
+			}
+
+			spans++;
+		} while (--count);
+	}
 }
 
 #elif kCommodettoBitmapRGB565BE == kPocoPixelFormat
 
+static void blendPixelRGB565BE(PocoPixel *p, PocoPixel color, uint8_t blend5)
+{
+	int src32, dst;
+
+	if (31 == blend5) {
+		*p = color;
+		return;
+	}
+
+	src32 = commodetto_bswap16(color);
+	src32 |= src32 << 16;
+	src32 &= 0x07E0F81F;
+	dst = commodetto_bswap16(*p);
+	dst |= dst << 16;
+	dst &= 0x07E0F81F;
+	src32 = src32 - dst;
+	dst = blend5 * src32 + (dst << 5) - dst;
+	dst += 0x02008010;
+	dst += (dst >> 5) & 0x07E0F81F;
+	dst >>= 5;
+	dst &= 0x07E0F81F;
+	dst |= dst >> 16;
+	*p = (PocoPixel)commodetto_bswap16((uint16_t)dst);
+}
+
 void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	int src32 = commodetto_bswap16(os->color);
-	src32 |= src32 << 16;
-	src32 &= 0x07E0F81F;
 
-	pixels -= os->x;
-	do {
-		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
-		uint8_t blend = spans->coverage;
-
-		if (255 == blend) {
-			uint16_t pixel = os->color;
-			while (len--)
-				*p++ = pixel;
+	if (kPocoPaintLinearGradient == os->paintKind) {
+		PocoPixel rowColor = 0;
+		uint8_t haveRowColor = 0;
+		if (os->gradient.flags & kPocoGradientFlagVertical) {
+			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
+			haveRowColor = 1;
 		}
-		else {
-			blend >>= 3;
-
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			int x = spans->x;
+			PocoPixel *p = pixels + x;
+			uint8_t blend = spans->coverage >> 3;
 			while (len--) {
-				int	dst, src;
-
-				dst = commodetto_bswap16(*p);
-				dst |= dst << 16;
-				dst &= 0x07E0F81F;
-				src = src32 - dst;
-				dst = blend * src + (dst << 5) - dst;
-				dst += 0x02008010;
-				dst += (dst >> 5) & 0x07E0F81F;
-				dst >>= 5;
-				dst &= 0x07E0F81F;
-				dst |= dst >> 16;
-				*p++ = (PocoPixel)commodetto_bswap16((uint16_t)dst);
+				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				blendPixelRGB565BE(p++, color, (255 == spans->coverage) ? 31 : blend);
+				x += 1;
 			}
-		}
+			spans++;
+		} while (--count);
+		return;
+	}
 
-		spans++;
-	} while (--count);
+	{
+		int src32 = commodetto_bswap16(os->color);
+		src32 |= src32 << 16;
+		src32 &= 0x07E0F81F;
+
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			PocoPixel *p = pixels + spans->x;
+			uint8_t blend = spans->coverage;
+
+			if (255 == blend) {
+				uint16_t pixel = os->color;
+				while (len--)
+					*p++ = pixel;
+			}
+			else {
+				blend >>= 3;
+
+				while (len--) {
+					int	dst, src;
+
+					dst = commodetto_bswap16(*p);
+					dst |= dst << 16;
+					dst &= 0x07E0F81F;
+					src = src32 - dst;
+					dst = blend * src + (dst << 5) - dst;
+					dst += 0x02008010;
+					dst += (dst >> 5) & 0x07E0F81F;
+					dst >>= 5;
+					dst &= 0x07E0F81F;
+					dst |= dst >> 16;
+					*p++ = (PocoPixel)commodetto_bswap16((uint16_t)dst);
+				}
+			}
+
+			spans++;
+		} while (--count);
+	}
 }
 
 #elif kCommodettoBitmapGray16 == kPocoPixelFormat
@@ -435,11 +784,11 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	uint8_t color = os->color;
 
 	do {
 		uint16_t len = spans->len;
 		int dx = spans->x - os->x;
+		int x = spans->x;
 		PocoPixel *p = pixels + (dx >> 1);
 		uint8_t xphase = os->xphase + (dx & 1);
 		if (2 == xphase) {
@@ -447,22 +796,22 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 			p++;
 		}
 		uint16_t c = spans->coverage;
-		if (255 == c) {
-			if (len && xphase) {
+		while (len--) {
+			uint8_t color = os->color;
+			if (kPocoPaintLinearGradient == os->paintKind)
+				color = (uint8_t)PocoLinearGradientSamplePixel(&os->gradient, x, y);
+			if (255 == c) {
 				uint8_t pixel = *p;
-				*p++ = (pixel & 0xF0) | color;
-				xphase = 0;
-				len -= 1;
+				if (xphase) {
+					*p++ = (pixel & 0xF0) | color;
+					xphase = 0;
+				}
+				else {
+					*p = (pixel & 0x0F) | (color << 4);
+					xphase = 1;
+				}
 			}
-			while (len >= 2) {
-				*p++ = color | (color << 4);
-				len -= 2;
-			}
-			if (len)
-				*p = (*p & 0x0F) | (color << 4);
-		}
-		else {
-			while (len--) {
+			else {
 				uint8_t pixel = *p;
 				uint16_t accum;
 				if (xphase)
@@ -481,6 +830,7 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 					xphase = 1;
 				}
 			}
+			x += 1;
 		}
 
 		spans++;
@@ -492,26 +842,26 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	PocoPixel color = os->color;
 
 	pixels -= os->x;
 	do {
 		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
+		int x = spans->x;
+		PocoPixel *p = pixels + x;
 		uint8_t blend = spans->coverage >> 3;
 
-		if (31 == blend) {
-			while (len--)
+		while (len--) {
+			PocoPixel color = os->color;
+			if (kPocoPaintLinearGradient == os->paintKind)
+				color = PocoLinearGradientSamplePixel(&os->gradient, x, y);
+			if (31 == blend)
 				*p++ = color;
-		}
-		else {
-			uint16_t pixel = color * blend;
-
-			blend = 31 - blend;
-			while (len--) {
-				uint16_t t = (*p * blend) + pixel;
+			else {
+				uint16_t pixel = color * blend;
+				uint16_t t = (*p * (31 - blend)) + pixel;
 				*p++ = t >> 5;
 			}
+			x += 1;
 		}
 
 		spans++;
@@ -528,34 +878,60 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	int src32 = os->color;
-	src32 |= src32 << 16;
-	src32 &= 0x07E0F81F;
 
-	pixels -= os->x;
-	do {
-		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
-		uint8_t blend = (spans->coverage * os->blend) >> 11;
-
-		while (len--) {
-			int	dst, src;
-
-			dst = *p;
-			dst |= dst << 16;
-			dst &= 0x07E0F81F;
-			src = src32 - dst;
-			dst = blend * src + (dst << 5) - dst;
-			dst += 0x02008010;
-			dst += (dst >> 5) & 0x07E0F81F;
-			dst >>= 5;
-			dst &= 0x07E0F81F;
-			dst |= dst >> 16;
-			*p++ = (PocoPixel)dst;
+	if (kPocoPaintLinearGradient == os->paintKind) {
+		PocoPixel rowColor = 0;
+		uint8_t haveRowColor = 0;
+		if (os->gradient.flags & kPocoGradientFlagVertical) {
+			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
+			haveRowColor = 1;
 		}
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			int x = spans->x;
+			PocoPixel *p = pixels + x;
+			uint8_t blend = (spans->coverage * os->blend) >> 11;
+			while (len--) {
+				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				blendPixelRGB565LE(p++, color, blend);
+				x += 1;
+			}
+			spans++;
+		} while (--count);
+		return;
+	}
 
-		spans++;
-	} while (--count);
+	{
+		int src32 = os->color;
+		src32 |= src32 << 16;
+		src32 &= 0x07E0F81F;
+
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			PocoPixel *p = pixels + spans->x;
+			uint8_t blend = (spans->coverage * os->blend) >> 11;
+
+			while (len--) {
+				int	dst, src;
+
+				dst = *p;
+				dst |= dst << 16;
+				dst &= 0x07E0F81F;
+				src = src32 - dst;
+				dst = blend * src + (dst << 5) - dst;
+				dst += 0x02008010;
+				dst += (dst >> 5) & 0x07E0F81F;
+				dst >>= 5;
+				dst &= 0x07E0F81F;
+				dst |= dst >> 16;
+				*p++ = (PocoPixel)dst;
+			}
+
+			spans++;
+		} while (--count);
+	}
 }
 
 #elif kCommodettoBitmapRGB565BE == kPocoPixelFormat
@@ -564,34 +940,60 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	int src32 = commodetto_bswap16(os->color);
-	src32 |= src32 << 16;
-	src32 &= 0x07E0F81F;
 
-	pixels -= os->x;
-	do {
-		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
-		uint8_t blend = (spans->coverage * os->blend) >> 11;
-
-		while (len--) {
-			int	dst, src;
-
-			dst = commodetto_bswap16(*p);
-			dst |= dst << 16;
-			dst &= 0x07E0F81F;
-			src = src32 - dst;
-			dst = blend * src + (dst << 5) - dst;
-			dst += 0x02008010;
-			dst += (dst >> 5) & 0x07E0F81F;
-			dst >>= 5;
-			dst &= 0x07E0F81F;
-			dst |= dst >> 16;
-			*p++ = (PocoPixel)commodetto_bswap16((uint16_t)dst);
+	if (kPocoPaintLinearGradient == os->paintKind) {
+		PocoPixel rowColor = 0;
+		uint8_t haveRowColor = 0;
+		if (os->gradient.flags & kPocoGradientFlagVertical) {
+			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
+			haveRowColor = 1;
 		}
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			int x = spans->x;
+			PocoPixel *p = pixels + x;
+			uint8_t blend = (spans->coverage * os->blend) >> 11;
+			while (len--) {
+				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				blendPixelRGB565BE(p++, color, blend);
+				x += 1;
+			}
+			spans++;
+		} while (--count);
+		return;
+	}
 
-		spans++;
-	} while (--count);
+	{
+		int src32 = commodetto_bswap16(os->color);
+		src32 |= src32 << 16;
+		src32 &= 0x07E0F81F;
+
+		pixels -= os->x;
+		do {
+			uint16_t len = spans->len;
+			PocoPixel *p = pixels + spans->x;
+			uint8_t blend = (spans->coverage * os->blend) >> 11;
+
+			while (len--) {
+				int	dst, src;
+
+				dst = commodetto_bswap16(*p);
+				dst |= dst << 16;
+				dst &= 0x07E0F81F;
+				src = src32 - dst;
+				dst = blend * src + (dst << 5) - dst;
+				dst += 0x02008010;
+				dst += (dst >> 5) & 0x07E0F81F;
+				dst >>= 5;
+				dst &= 0x07E0F81F;
+				dst |= dst >> 16;
+				*p++ = (PocoPixel)commodetto_bswap16((uint16_t)dst);
+			}
+
+			spans++;
+		} while (--count);
+	}
 }
 
 #elif kCommodettoBitmapGray16 == kPocoPixelFormat
@@ -600,11 +1002,11 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	uint8_t color = os->color;
 
 	do {
 		uint16_t len = spans->len;
 		int dx = spans->x - os->x;
+		int x = spans->x;
 		PocoPixel *p = pixels + (dx >> 1);
 		uint8_t xphase = os->xphase + (dx & 1);
 		if (2 == xphase) {
@@ -612,25 +1014,31 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 			p++;
 		}
 		uint16_t c = (spans->coverage * os->blend) >> 8;
-		uint16_t cc = color * c;
 		while (len--) {
-			uint8_t pixel = *p;
-			uint16_t accum;
-			if (xphase)
-				accum = pixel & 0x0F;
-			else
-				accum = (pixel & 0xF0) >> 4;
-			accum *= (255 - c);
-			accum += cc;
-			accum >>= 8;
-			if (xphase) {
-				*p++ = (pixel & 0xF0) | accum;
-				xphase = 0;
+			uint8_t color = os->color;
+			if (kPocoPaintLinearGradient == os->paintKind)
+				color = (uint8_t)PocoLinearGradientSamplePixel(&os->gradient, x, y);
+			{
+				uint8_t pixel = *p;
+				uint16_t accum;
+				uint16_t cc = color * c;
+				if (xphase)
+					accum = pixel & 0x0F;
+				else
+					accum = (pixel & 0xF0) >> 4;
+				accum *= (255 - c);
+				accum += cc;
+				accum >>= 8;
+				if (xphase) {
+					*p++ = (pixel & 0xF0) | accum;
+					xphase = 0;
+				}
+				else {
+					*p = (pixel & 0x0F) | (accum << 4);
+					xphase = 1;
+				}
 			}
-			else {
-				*p = (pixel & 0x0F) | (accum << 4);
-				xphase = 1;
-			}
+			x += 1;
 		}
 
 		spans++;
@@ -643,19 +1051,24 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 {
 	xsOutlineSpan os = user;
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
-	PocoPixel color = os->color;
 
 	pixels -= os->x;
 	do {
 		uint16_t len = spans->len;
-		PocoPixel *p = pixels + spans->x;
+		int x = spans->x;
+		PocoPixel *p = pixels + x;
 		uint8_t blend = spans->coverage >> 3;
-		uint16_t pixel = color * blend;
 
-		blend = 31 - blend;
 		while (len--) {
-			uint16_t t = (*p * blend) + pixel;
-			*p++ = t >> 5;
+			PocoPixel color = os->color;
+			if (kPocoPaintLinearGradient == os->paintKind)
+				color = PocoLinearGradientSamplePixel(&os->gradient, x, y);
+			{
+				uint16_t pixel = color * blend;
+				uint16_t t = (*p * (31 - blend)) + pixel;
+				*p++ = t >> 5;
+			}
+			x += 1;
 		}
 
 		spans++;
@@ -667,13 +1080,16 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 #endif
 
 
-void PocoOutlineFill(Poco poco, PocoColor color, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy)
+static void outlineFillCommon(Poco poco, uint8_t paintKind, PocoColor color, const PocoLinearGradientRecord *gradient, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy)
 {
 	xsOutlineRenderRecord orr;
 	PocoCoordinate xMax, yMax;
 	orr.or = PocoOutlineRenderer();
+	orr.paintKind = paintKind;
 	orr.color = color;
 	orr.blend = blend;
+	if (kPocoPaintLinearGradient == paintKind)
+		orr.gradient = *gradient;
 	bufferToFTOutline(pOutline, &orr.outline);
 	
 #if (90 == kPocoRotation) || (180 == kPocoRotation) || (270 == kPocoRotation)
@@ -729,3 +1145,12 @@ void PocoOutlineFill(Poco poco, PocoColor color, uint8_t blend, PocoOutline pOut
 	PocoDrawExternal(poco, doOutline, (void *)&orr, sizeof(orr), x, y, w, h);
 }
 
+void PocoOutlineFill(Poco poco, PocoColor color, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy)
+{
+	outlineFillCommon(poco, kPocoPaintSolid, color, NULL, blend, pOutline, dx, dy);
+}
+
+void PocoOutlineFillGradient(Poco poco, const PocoLinearGradientRecord *gradient, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy)
+{
+	outlineFillCommon(poco, kPocoPaintLinearGradient, 0, gradient, blend, pOutline, dx, dy);
+}

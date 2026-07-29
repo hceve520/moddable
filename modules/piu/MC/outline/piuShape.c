@@ -34,11 +34,15 @@ struct PiuShapeStruct {
 	uint8_t fillBlend;
 	PocoColor fillColor;
 	void* fillOutline;
+	void* fillGradient;
 
 	uint8_t strokeBlend;
 	PocoColor strokeColor;
 	void* strokeOutline;
+	void* strokeGradient;
 };
+
+extern void PocoLinearGradientFromSlot(xsMachine *the, xsSlot *slot, PocoLinearGradient gradient);
 
 static void PiuShapeBind(void* it, PiuApplication* application, PiuView* view);
 static void PiuShapeDictionary(xsMachine* the, void* it);
@@ -99,33 +103,43 @@ void PiuShapeDraw(void* it, PiuView* view, PiuRectangle area)
 {
 	PiuShape* self = it;
 	PiuSkin* skin = (*self)->skin;
+	PiuColorRecord color;
+	PiuState state = (*self)->state;
+	uint8_t canDrawFill, canDrawStroke;
+	if (state < 0) state = 0;
+	else if (3 < state) state = 3;
+
+	canDrawFill = (*self)->fillOutline && (skin || (*self)->fillGradient);
+	canDrawStroke = (*self)->strokeOutline && (skin || (*self)->strokeGradient);
+	if (!(canDrawFill || canDrawStroke))
+		return;
+
 	if (skin) {
-		PiuColorRecord color;
-		PiuState state = (*self)->state;
-		if (state < 0) state = 0;
-		else if (3 < state) state = 3;
-		if ((*self)->fillOutline) {
+		if (canDrawFill) {
 			PiuColorsBlend((*skin)->data.color.fill, state, &color);
 			(*self)->fillColor = PocoMakeColor((*view)->poco, color.r, color.g, color.b);
 			(*self)->fillBlend = color.a;
 		}
-		if ((*self)->strokeOutline) {
+		if (canDrawStroke) {
 			PiuColorsBlend((*skin)->data.color.stroke, state, &color);
 			(*self)->strokeColor = PocoMakeColor((*view)->poco, color.r, color.g, color.b);
 			(*self)->strokeBlend = color.a;
 		}
-		if ((*self)->fillOutline || (*self)->strokeOutline) {
-			if ((*self)->flags & piuClip) {
-				PiuRectangleRecord bounds;
-				PiuRectangleSet(&bounds, 0, 0, (*self)->bounds.width, (*self)->bounds.height);
-				PiuViewPushClip(view, 0, 0, bounds.width, bounds.height);
-				PiuViewDrawContent(view, PiuShapeDrawAux, it, 0, 0, bounds.width, bounds.height);
-				PiuViewPopClip(view);
-			}
-			else 
-				PiuViewDrawContent(view, PiuShapeDrawAux, it, 0, 0, (*self)->bounds.width, (*self)->bounds.height);
-		}
 	}
+	else {
+		(*self)->fillBlend = 255;
+		(*self)->strokeBlend = 255;
+	}
+
+	if ((*self)->flags & piuClip) {
+		PiuRectangleRecord bounds;
+		PiuRectangleSet(&bounds, 0, 0, (*self)->bounds.width, (*self)->bounds.height);
+		PiuViewPushClip(view, 0, 0, bounds.width, bounds.height);
+		PiuViewDrawContent(view, PiuShapeDrawAux, it, 0, 0, bounds.width, bounds.height);
+		PiuViewPopClip(view);
+	}
+	else 
+		PiuViewDrawContent(view, PiuShapeDrawAux, it, 0, 0, (*self)->bounds.width, (*self)->bounds.height);
 }
 
 void PiuShapeDrawAux(void* it, PiuView* view, PiuCoordinate x, PiuCoordinate y, PiuDimension sw, PiuDimension sh)
@@ -133,15 +147,29 @@ void PiuShapeDrawAux(void* it, PiuView* view, PiuCoordinate x, PiuCoordinate y, 
 	PiuShape* self = it;
 	PocoOutline outline;
 	xsBeginHost((*self)->the);
-	if ((*self)->fillOutline) {
+	if ((*self)->fillOutline && ((*self)->fillGradient || (*self)->skin)) {
 		xsResult = xsReference((*self)->fillOutline);
 		outline = xsGetHostData(xsResult);
-		PocoOutlineFill((*view)->poco, (*self)->fillColor, (*self)->fillBlend, outline, x, y);
+		if ((*self)->fillGradient) {
+			PocoLinearGradientRecord gradient;
+			xsResult = xsReference((*self)->fillGradient);
+			PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
+			PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->fillBlend, outline, x, y);
+		}
+		else
+			PocoOutlineFill((*view)->poco, (*self)->fillColor, (*self)->fillBlend, outline, x, y);
 	}
-	if ((*self)->strokeOutline) {
+	if ((*self)->strokeOutline && ((*self)->strokeGradient || (*self)->skin)) {
 		xsResult = xsReference((*self)->strokeOutline);
 		outline = xsGetHostData(xsResult);
-		PocoOutlineFill((*view)->poco, (*self)->strokeColor, (*self)->strokeBlend, outline, x, y);
+		if ((*self)->strokeGradient) {
+			PocoLinearGradientRecord gradient;
+			xsResult = xsReference((*self)->strokeGradient);
+			PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
+			PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->strokeBlend, outline, x, y);
+		}
+		else
+			PocoOutlineFill((*view)->poco, (*self)->strokeColor, (*self)->strokeBlend, outline, x, y);
 	}
 	xsEndHost((*self)->the);
 }
@@ -151,7 +179,9 @@ void PiuShapeMark(xsMachine* the, void* it, xsMarkRoot markRoot)
 	PiuShape self = it;
 	PiuContentMark(the, it, markRoot);
 	PiuMarkReference(the, self->fillOutline);
+	PiuMarkReference(the, self->fillGradient);
 	PiuMarkReference(the, self->strokeOutline);
+	PiuMarkReference(the, self->strokeGradient);
 }
 
 void PiuShapeMeasureHorizontally(void* it) 
@@ -254,6 +284,22 @@ void PiuShape_get_strokeOutline(xsMachine* the)
 		xsResult = xsReference(strokeOutline);
 }
 
+void PiuShape_get_fillGradient(xsMachine* the)
+{
+	PiuShape* self = PIU(Shape, xsThis);
+	xsSlot* fillGradient = (*self)->fillGradient;
+	if (fillGradient)
+		xsResult = xsReference(fillGradient);
+}
+
+void PiuShape_get_strokeGradient(xsMachine* the)
+{
+	PiuShape* self = PIU(Shape, xsThis);
+	xsSlot* strokeGradient = (*self)->strokeGradient;
+	if (strokeGradient)
+		xsResult = xsReference(strokeGradient);
+}
+
 void PiuShape_set_fillOutline(xsMachine *the)
 {
 	PiuShape* self = PIU(Shape, xsThis);
@@ -274,4 +320,22 @@ void PiuShape_set_strokeOutline(xsMachine *the)
 		PiuContentInvalidate(self, NULL);
 }
 
+void PiuShape_set_fillGradient(xsMachine *the)
+{
+	PiuShape* self = PIU(Shape, xsThis);
+	if (xsTest(xsArg(0)))
+		(*self)->fillGradient = xsToReference(xsArg(0));
+	else
+		(*self)->fillGradient = NULL;
+	PiuContentInvalidate(self, NULL);
+}
 
+void PiuShape_set_strokeGradient(xsMachine *the)
+{
+	PiuShape* self = PIU(Shape, xsThis);
+	if (xsTest(xsArg(0)))
+		(*self)->strokeGradient = xsToReference(xsArg(0));
+	else
+		(*self)->strokeGradient = NULL;
+	PiuContentInvalidate(self, NULL);
+}

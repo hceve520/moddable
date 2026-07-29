@@ -218,14 +218,26 @@ Returns the outline.
 
 The [Poco renderer](https://github.com/Moddable-OpenSource/moddable/blob/public/documentation/commodetto/poco.md) has one method to render outlines and one method to render polygons.
 
-#### `Poco.prototype.blendOutline(color, blend, outline, x, y)`
+#### `Poco.prototype.blendOutline(colorOrGradient, blend, outline, x, y)`
 
 | Argument | Type | Description |
 | --- | --- | :--- |
-| `color` | number | the rendering color, a value returned by `Poco.prototype.makeColor`  |
+| `colorOrGradient` | number or object | a color from `Poco.prototype.makeColor`, or a linear gradient descriptor (see below) |
 | `blend` | number | the level of blending, from a value of 0 for transparent to a value of 255 for opaque |
 | `outline` | number | the outline to render, an instance of `Outline.prototype` |
 | `x`, `y` | number | where to render the outline |
+
+A linear gradient descriptor is an object with `x0`, `y0`, `x1`, `y1` (in the same coordinate space as the outline path) and a `stops` array. Each stop is `{ offset, r, g, b }` with `offset` from 0 to 1, or `{ offset, color }` using a value from `makeColor`. Up to 8 stops are supported. Use `Poco.prototype.makeLinearGradient(x0, y0, x1, y1, stops)` to build the descriptor.
+
+```javascript
+const path = Outline.RoundRectPath(0, 0, 200, 60, 15);
+const outline = Outline.fill(path);
+const gradient = poco.makeLinearGradient(0, 0, 0, 60, [
+	{ offset: 0, r: 0, g: 123, b: 255 },
+	{ offset: 1, r: 0, g: 105, b: 217 },
+]);
+poco.blendOutline(gradient, 255, outline, 20, 20);
+```
 
 #### `Poco.prototype.blendPolygon(color, blend, x0, y0, x1, y1 /* etc */)`
 
@@ -352,6 +364,8 @@ Prototype inherits from `Content.prototype`.
 | --- | --- | --- | --- | :--- |
 | `fillOutline` | `object` | `null` | | The outline object to display with the fill color |
 | `strokeOutline` | `object` | `null` | | The outline object to display with the stroke color |
+| `fillGradient` | `object` | `null` | | Optional linear gradient descriptor used instead of the skin fill color (`x0`, `y0`, `x1`, `y1`, `stops`) |
+| `strokeGradient` | `object` | `null` | | Optional linear gradient descriptor used instead of the skin stroke color |
 
 ## Example using Piu
 

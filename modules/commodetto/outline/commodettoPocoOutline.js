@@ -20,7 +20,16 @@
 
 import Poco from "commodetto/PocoCore";
 
-Poco.prototype.blendOutline = function(color, blend, outline, x, y) { return native("xs_outlinerenderer_blendOutline").call(this, color, blend, outline, x, y); };
+Poco.prototype.blendOutline = function(colorOrGradient, blend, outline, x, y) { return native("xs_outlinerenderer_blendOutline").call(this, colorOrGradient, blend, outline, x, y); };
 Poco.prototype.blendPolygon = function(color, blend, polygon) { return native("xs_outlinerenderer_blendPolygon").call(this, color, blend, polygon); };
+
+/**
+ * Build a linear gradient descriptor for blendOutline.
+ * Coordinates are in the same space as the outline path.
+ * Each stop: { offset: 0..1, r, g, b } or { offset: 0..1, color: poco.makeColor(...) }
+ */
+Poco.prototype.makeLinearGradient = function(x0, y0, x1, y1, stops) {
+	return { x0, y0, x1, y1, stops };
+};
 
 export default Object.freeze({});
