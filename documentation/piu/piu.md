@@ -3522,6 +3522,9 @@ If there is a `texture` or `Texture` property in the dictionary, the constructor
 | `borders` | `object` | The borders to stroke `content` objects with, as an object with `left`, `right`, `top`, or `bottom` number properties, specified in pixels. The default is no borders.
 | `fill` | `string` or `array` | The color(s) to fill `content` objects with, as a string or an `array` of strings of the form specified in the [Color](#color) section of this document.
 | `stroke` | `string` or `array` | This skin's stroke color(s), as a string or an `array` of strings of the form specified in the [Color](#color) section of this document.
+| `radius` | `number` | Corner radius in pixels for rounded color skins. Used by MCU [`RoundContent`](../commodetto/outline/Outlines.md#draw-using-piu-roundcontent-object) when drawing with Outline support.
+| `fillGradient` | `object` | Optional linear gradient descriptor (`x0`, `y0`, `x1`, `y1`, `stops`) used by `RoundContent` instead of a solid fill color.
+| `strokeGradient` | `object` | Optional linear gradient descriptor used by `RoundContent` for the border/stroke ring.
 
 #### Prototype Description
 
@@ -3554,7 +3557,12 @@ All properties of a `skin` object are read-only, but you can change the style of
 | --- | --- | --- | --- |
 | `borders` | `object` | `{left: 0, right: 0, top: 0, bottom: 0}` | This skin's borders, as an object with `left`, `right`, `top`, and `bottom` number properties, specified in pixels
 | `fill` | `object` | | This skin's fill color(s), as an `array` of strings of the form specified in the [Color](#color) section of this document.<BR><BR>The `state` property of the `content` object using the skin determines the index of the array; if `state` is not an integer, colors from surrounding states are blended. If specified as one string instead of an array, it is treated as an array with a single item. The default fill color is `transparent`.
+| `fillGradient` | `object` | `null` | Optional linear gradient descriptor for rounded skins drawn by `RoundContent`
+| `radius` | `number` | `0` | Corner radius in pixels for rounded skins drawn by `RoundContent`
 | `stroke` | `object` | |This skin's stroke color(s), as an `array` of strings of the form specified in the [Color](#color) section of this document.<BR><BR>The `state` property of the `content` object using the skin determines the index of the array; if `state` is not an integer, colors from surrounding states are blended. If specified as one string instead of an array, it is treated as an array with a single item. The default stroke color is `transparent`.
+| `strokeGradient` | `object` | `null` | Optional linear gradient descriptor for the border ring drawn by `RoundContent`
+
+Rounded and gradient color skins are drawn on MCU targets with the `RoundContent` object from the Outline module (`modules/piu/MC/outline`). Ordinary `Content` / `Label` objects still draw color skins as axis-aligned rectangles; wrap them in `RoundContent` (a `Container`) to get rounded corners and gradients.
 
 ***
 

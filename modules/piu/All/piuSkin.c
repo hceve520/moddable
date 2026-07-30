@@ -129,6 +129,19 @@ void PiuSkinCreate(xsMachine* the)
 				PiuColorsDictionary(the, &xsResult, self->data.color.fill);
 			if (xsFindResult(xsArg(0), xsID_stroke))
 				PiuColorsDictionary(the, &xsResult, self->data.color.stroke);
+			if (xsFindInteger(xsArg(0), xsID_radius, &integer)) {
+				if (integer < 0)
+					integer = 0;
+				self->radius = (PiuDimension)integer;
+			}
+			if (xsFindResult(xsArg(0), xsID_fillGradient)) {
+				if (xsTest(xsResult))
+					self->fillGradient = xsToReference(xsResult);
+			}
+			if (xsFindResult(xsArg(0), xsID_strokeGradient)) {
+				if (xsTest(xsResult))
+					self->strokeGradient = xsToReference(xsResult);
+			}
 		}
 	}
 	xsSetHostChunk(xsThis, self, sizeof(record));
@@ -324,8 +337,13 @@ PiuDimension PiuSkinGetHeight(PiuSkin* self)
 void PiuSkinMark(xsMachine* the, void* it, xsMarkRoot markRoot)
 {
 	PiuSkin self = it;
-	if (self->flags & piuSkinPattern)
+	if (self->flags & piuSkinPattern) {
 		PiuMarkHandle(the, self->data.pattern.texture);
+	}
+	else {
+		PiuMarkReference(the, self->fillGradient);
+		PiuMarkReference(the, self->strokeGradient);
+	}
 }
 
 void PiuSkin_get_borders(xsMachine* the)
@@ -384,6 +402,17 @@ void PiuSkin_get_fill(xsMachine* the)
 		PiuColorsSerialize(the, (*self)->data.color.fill);
 }
 
+void PiuSkin_get_fillGradient(xsMachine* the)
+{
+	PiuSkin* self = PIU(Skin, xsThis);
+	PiuFlags flags = (*self)->flags;
+	if (!(flags & piuSkinPattern)) {
+		xsSlot* fillGradient = (*self)->fillGradient;
+		if (fillGradient)
+			xsResult = xsReference(fillGradient);
+	}
+}
+
 void PiuSkin_get_left(xsMachine* the)
 {
 	PiuSkin* self = PIU(Skin, xsThis);
@@ -394,6 +423,14 @@ void PiuSkin_get_left(xsMachine* the)
 	}
 	else
 		xsResult = xsPiuCoordinate((*self)->data.color.borders.left);
+}
+
+void PiuSkin_get_radius(xsMachine* the)
+{
+	PiuSkin* self = PIU(Skin, xsThis);
+	PiuFlags flags = (*self)->flags;
+	if (!(flags & piuSkinPattern))
+		xsResult = xsPiuDimension((*self)->radius);
 }
 
 void PiuSkin_get_right(xsMachine* the)
@@ -423,6 +460,17 @@ void PiuSkin_get_stroke(xsMachine* the)
     xsVars(1);
 	if (!(flags & piuSkinPattern))
 		PiuColorsSerialize(the, (*self)->data.color.stroke);
+}
+
+void PiuSkin_get_strokeGradient(xsMachine* the)
+{
+	PiuSkin* self = PIU(Skin, xsThis);
+	PiuFlags flags = (*self)->flags;
+	if (!(flags & piuSkinPattern)) {
+		xsSlot* strokeGradient = (*self)->strokeGradient;
+		if (strokeGradient)
+			xsResult = xsReference(strokeGradient);
+	}
 }
 
 void PiuSkin_get_texture(xsMachine* the)

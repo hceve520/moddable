@@ -367,6 +367,67 @@ Prototype inherits from `Content.prototype`.
 | `fillGradient` | `object` | `null` | | Optional linear gradient descriptor used instead of the skin fill color (`x0`, `y0`, `x1`, `y1`, `stops`) |
 | `strokeGradient` | `object` | `null` | | Optional linear gradient descriptor used instead of the skin stroke color |
 
+## Draw using Piu RoundContent Object
+
+The Piu `RoundContent` object is a `container` that draws a rounded rectangle using Outline, then lays out children on top. It is the MCU counterpart to the desktop `RoundContent`, extended with Skin-driven gradients.
+
+Include the Outline Piu manifest:
+
+```json
+"include": "$(MODDABLE)/modules/piu/MC/outline/manifest.json"
+```
+
+Import:
+
+```javascript
+import {} from "piu/RoundContent";
+```
+
+Color `Skin` objects may declare `radius`, `fillGradient`, and `strokeGradient`. `RoundContent` uses those values when its own `radius` / gradient properties are not set.
+
+```javascript
+const buttonSkin = new Skin({
+	fill: ["#1B7A6E", "#249F90"],
+	stroke: "#0E4F47",
+	radius: 18,
+	fillGradient: {
+		x0: 0, y0: 0, x1: 0, y1: 64,
+		stops: [
+			{ offset: 0, r: 66, g: 133, b: 244 },
+			{ offset: 1, r: 26, g: 115, b: 232 },
+		],
+	},
+});
+
+new RoundContent(null, {
+	left: 20, right: 20, top: 24, height: 64,
+	border: 2,
+	skin: buttonSkin,
+	contents: [
+		new Label(null, {
+			left: 0, right: 0, top: 0, bottom: 0,
+			style: labelStyle,
+			string: "Rounded Skin",
+		}),
+	],
+});
+```
+
+See `examples/piu/outline/round-skin` for a complete sample.
+
+#### Prototype Description
+
+Prototype inherits from `Container.prototype`.
+
+##### Properties
+
+| Name | Type | Default Value | Read Only | Description |
+| --- | --- | --- | --- | :--- |
+| `border` | `number` | `0` | | Uniform border width in pixels. When greater than 0, the border ring uses the skin stroke color or `strokeGradient`. |
+| `radius` | `number` | `0` | | Corner radius in pixels. If 0, the skin's `radius` is used. |
+| `fillGradient` | `object` | `null` | | Optional linear gradient for the interior. If null, the skin's `fillGradient` or fill color is used. |
+| `strokeGradient` | `object` | `null` | | Optional linear gradient for the border ring. If null, the skin's `strokeGradient` or stroke color is used. |
+
 ## Example using Piu
 
 Let us use shapes to build a simple analog clock.

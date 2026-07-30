@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025 Moddable Tech, Inc
+ * Copyright (c) 2026 Moddable Tech, Inc
  *
  *   This file is part of the Moddable SDK Tools.
  *
@@ -18,30 +18,29 @@
  *
  */
 
+declare module "piu/RoundContent" {
+  import { Container, ContainerDictionary, LinearGradient } from "piu/MC";
 
-declare module "piu/shape" {
-  import { Content, ContentDictionary, LinearGradient } from "piu/MC";
-  import { Outline } from "commodetto/outline";
-
-  interface Shape extends Content {
-    fillOutline: Outline,
-    strokeOutline: Outline,
-    fillGradient: LinearGradient | null,
-    strokeGradient: LinearGradient | null,
+  interface RoundContent extends Container {
+    border: number;
+    radius: number;
+    fillGradient: LinearGradient | null;
+    strokeGradient: LinearGradient | null;
   }
-  interface ShapeDictionary extends ContentDictionary {
-    string?: string;
+  interface RoundContentDictionary extends ContainerDictionary {
+    border?: number;
+    radius?: number;
     fillGradient?: LinearGradient;
     strokeGradient?: LinearGradient;
   }
-  interface ShapeConstructor {
-    new(behaviorData?: any, dictionary?: ShapeDictionary): Shape;
-    (behaviorData?: any, dictionary?: ShapeDictionary): Shape;
+  interface RoundContentConstructor {
+    new(behaviorData?: any, dictionary?: RoundContentDictionary): RoundContent;
+    (behaviorData?: any, dictionary?: RoundContentDictionary): RoundContent;
 
-    template<T>(this: T, fn: (arg: object) => ShapeDictionary): T;
+    template<T>(this: T, fn: (arg: object) => RoundContentDictionary): T;
   }
 
   global {
-    const Shape: ShapeConstructor
+    const RoundContent: RoundContentConstructor
   }
 }
