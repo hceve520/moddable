@@ -415,6 +415,49 @@ new RoundContent(null, {
 
 See `examples/piu/outline/round-skin` for a complete sample.
 
+## Draw using Piu PathPort
+
+`PathPort` extends Piu `Port` with a lightweight Canvas-like path API for custom drawing inside `onDraw`. It is **not** a full `CanvasRenderingContext2D`; path construction maps to `Outline.CanvasPath`, and `fill` / `stroke` build Outline objects drawn through Poco.
+
+```javascript
+import { PathPort } from "piu/PortPath";
+
+class GaugeBehavior extends Behavior {
+	onDraw(port) {
+		port.fillRoundRect("#1A73E8", 20, 20, 200, 60, 16);
+
+		port.beginPath();
+		port.arc(120, 120, 48, 0, Math.PI);
+		port.strokeStyle = "white";
+		port.lineWidth = 8;
+		port.stroke();
+	}
+}
+
+new PathPort(null, { left: 0, right: 0, top: 0, bottom: 0, Behavior: GaugeBehavior });
+```
+
+### PathPort properties
+
+| Name | Type | Default | Description |
+| --- | --- | --- | :--- |
+| `fillStyle` | color string / number / gradient | `"white"` | Paint used by `fill()` |
+| `strokeStyle` | color string / number / gradient | `"white"` | Paint used by `stroke()` |
+| `lineWidth` | number | `1` | Stroke weight |
+| `lineCap` | number | `Outline.LINECAP_ROUND` | Stroke cap |
+| `lineJoin` | number | `Outline.LINEJOIN_ROUND` | Stroke join |
+| `blend` | number | `255` | Opacity 0–255 |
+
+### PathPort methods
+
+Path builders: `beginPath`, `moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc`, `arcTo`, `ellipse`, `rect`, `closePath`.
+
+Painting: `fill([rule])`, `stroke([weight, cap, join])`, `fillRoundRect(...)`, `strokeRoundRect(...)`, and low-level `drawOutline(paint, blend, outline, x?, y?)`.
+
+`PathPort.Outline` references the Outline module (for `LINECAP_*` / `LINEJOIN_*` / rules).
+
+See `examples/piu/outline/port-path`.
+
 #### Prototype Description
 
 Prototype inherits from `Container.prototype`.
