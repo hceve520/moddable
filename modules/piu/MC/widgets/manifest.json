@@ -1,0 +1,11 @@
+{
+	"include": [
+		"$(MODDABLE)/modules/piu/MC/outline/manifest.json"
+	],
+	"modules": {
+		"piu/widgets": "./piuWidgets"
+	},
+	"preload": [
+		"piu/widgets"
+	]
+}

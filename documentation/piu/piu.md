@@ -37,6 +37,7 @@ Piu is a user interface framework designed to run on microcontrollers. The progr
  	 * [Row Object](#row-object)
  	 * [Scroller Object](#scroller-object)
  	 * [Shape Object](../commodetto/outline/Outlines.md)
+ 	 * [MCU Widgets](widgets.md)
  	 * [Skin Object](#skin-object)
  	 * [Sound Object](#sound-object)
  	 * [Style Object](#style-object)
