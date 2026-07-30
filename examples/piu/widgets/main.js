@@ -97,6 +97,8 @@ const model = {
 };
 
 export default new WidgetsApplication(model, {
-	displayListLength: 4096,
+	commandListLength: 4096,
+	displayListLength: 16384,
 	touchCount: 1,
+	pixels: 240 * 64,
 });
