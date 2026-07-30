@@ -415,6 +415,19 @@ new RoundContent(null, {
 
 See `examples/piu/outline/round-skin` for a complete sample.
 
+#### Prototype Description
+
+Prototype inherits from `Container.prototype`.
+
+##### Properties
+
+| Name | Type | Default Value | Read Only | Description |
+| --- | --- | --- | --- | :--- |
+| `border` | `number` | `0` | | Uniform border width in pixels. When greater than 0, the border ring uses the skin stroke color or `strokeGradient`. |
+| `radius` | `number` | `0` | | Corner radius in pixels. If 0, the skin's `radius` is used. |
+| `fillGradient` | `object` | `null` | | Optional linear gradient for the interior. If null, the skin's `fillGradient` or fill color is used. |
+| `strokeGradient` | `object` | `null` | | Optional linear gradient for the border ring. If null, the skin's `strokeGradient` or stroke color is used. |
+
 ## Draw using Piu PathPort
 
 `PathPort` extends Piu `Port` with a lightweight Canvas-like path API for custom drawing inside `onDraw`. It is **not** a full `CanvasRenderingContext2D`; path construction maps to `Outline.CanvasPath`, and `fill` / `stroke` build Outline objects drawn through Poco.
@@ -457,19 +470,6 @@ Painting: `fill([rule])`, `stroke([weight, cap, join])`, `fillRoundRect(...)`, `
 `PathPort.Outline` references the Outline module (for `LINECAP_*` / `LINEJOIN_*` / rules).
 
 See `examples/piu/outline/port-path`.
-
-#### Prototype Description
-
-Prototype inherits from `Container.prototype`.
-
-##### Properties
-
-| Name | Type | Default Value | Read Only | Description |
-| --- | --- | --- | --- | :--- |
-| `border` | `number` | `0` | | Uniform border width in pixels. When greater than 0, the border ring uses the skin stroke color or `strokeGradient`. |
-| `radius` | `number` | `0` | | Corner radius in pixels. If 0, the skin's `radius` is used. |
-| `fillGradient` | `object` | `null` | | Optional linear gradient for the interior. If null, the skin's `fillGradient` or fill color is used. |
-| `strokeGradient` | `object` | `null` | | Optional linear gradient for the border ring. If null, the skin's `strokeGradient` or stroke color is used. |
 
 ## Example using Piu
 
