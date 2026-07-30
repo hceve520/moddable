@@ -28,67 +28,67 @@ import {} from "piu/RoundContent";
 		2 = pressed / active fill
 */
 
-const ButtonSkin = Skin.template({
-	fill: ["#5A6A72", "#1A73E8", "#1557B0"],
-	stroke: ["#3C4A50", "#0B57D0", "#0A4AAD"],
+const ButtonSkin = Skin.template(Object.freeze({
+	fill: Object.freeze(["#5A6A72", "#1A73E8", "#1557B0"]),
+	stroke: Object.freeze(["#3C4A50", "#0B57D0", "#0A4AAD"]),
 	radius: 18,
-});
-const ProgressTrackSkin = Skin.template({
+}));
+const ProgressTrackSkin = Skin.template(Object.freeze({
 	fill: "#2A3840",
 	stroke: "#3C5360",
 	radius: 6,
-});
-const ProgressFillSkin = Skin.template({
+}));
+const ProgressFillSkin = Skin.template(Object.freeze({
 	fill: "#1A73E8",
 	radius: 6,
-	fillGradient: {
+	fillGradient: Object.freeze({
 		x0: 0, y0: 0, x1: 200, y1: 0,
-		stops: [
-			{ offset: 0, r: 66, g: 133, b: 244 },
-			{ offset: 1, r: 26, g: 115, b: 232 },
-		],
-	},
-});
-const SwitchBarSkin = Skin.template({
-	fill: ["#3C4A50", "#1B7A6E"],
-	stroke: ["#2A3840", "#0E4F47"],
+		stops: Object.freeze([
+			Object.freeze({ offset: 0, r: 66, g: 133, b: 244 }),
+			Object.freeze({ offset: 1, r: 26, g: 115, b: 232 }),
+		]),
+	}),
+}));
+const SwitchBarSkin = Skin.template(Object.freeze({
+	fill: Object.freeze(["#3C4A50", "#1B7A6E"]),
+	stroke: Object.freeze(["#2A3840", "#0E4F47"]),
 	radius: 12,
-});
-const SwitchButtonSkin = Skin.template({
-	fill: ["#9AA5AB", "#F2F5F7"],
-	stroke: ["#6B787F", "#D7E2E8"],
+}));
+const SwitchButtonSkin = Skin.template(Object.freeze({
+	fill: Object.freeze(["#9AA5AB", "#F2F5F7"]),
+	stroke: Object.freeze(["#6B787F", "#D7E2E8"]),
 	radius: 11,
-});
-const SliderTrackSkin = Skin.template({
+}));
+const SliderTrackSkin = Skin.template(Object.freeze({
 	fill: "#2A3840",
 	stroke: "#3C5360",
 	radius: 4,
-});
-const SliderFillSkin = Skin.template({
+}));
+const SliderFillSkin = Skin.template(Object.freeze({
 	fill: "#1A73E8",
 	stroke: "#0B57D0",
 	radius: 4,
-	fillGradient: {
+	fillGradient: Object.freeze({
 		x0: 0, y0: 0, x1: 200, y1: 0,
-		stops: [
-			{ offset: 0, r: 66, g: 133, b: 244 },
-			{ offset: 1, r: 26, g: 115, b: 232 },
-		],
-	},
-});
-const SliderThumbSkin = Skin.template({
-	fill: ["#9AA5AB", "#F2F5F7", "#FFFFFF"],
-	stroke: ["#6B787F", "#D7E2E8", "#FFFFFF"],
+		stops: Object.freeze([
+			Object.freeze({ offset: 0, r: 66, g: 133, b: 244 }),
+			Object.freeze({ offset: 1, r: 26, g: 115, b: 232 }),
+		]),
+	}),
+}));
+const SliderThumbSkin = Skin.template(Object.freeze({
+	fill: Object.freeze(["#9AA5AB", "#F2F5F7", "#FFFFFF"]),
+	stroke: Object.freeze(["#6B787F", "#D7E2E8", "#FFFFFF"]),
 	radius: 11,
-});
-const ButtonStyle = Style.template({
+}));
+const ButtonStyle = Style.template(Object.freeze({
 	font: "20px Open Sans",
-	color: ["#B0B8BD", "white", "white"],
+	color: Object.freeze(["#B0B8BD", "white", "white"]),
 	horizontal: "center",
 	vertical: "middle",
-});
+}));
 
-export const widgetSkins = {
+export const widgetSkins = Object.freeze({
 	get button() { return ButtonSkin(); },
 	get progressTrack() { return ProgressTrackSkin(); },
 	get progressFill() { return ProgressFillSkin(); },
@@ -97,11 +97,11 @@ export const widgetSkins = {
 	get sliderTrack() { return SliderTrackSkin(); },
 	get sliderFill() { return SliderFillSkin(); },
 	get sliderThumb() { return SliderThumbSkin(); },
-};
+});
 
-export const widgetStyles = {
+export const widgetStyles = Object.freeze({
 	get button() { return ButtonStyle(); },
-};
+});
 
 // BUTTON
 
