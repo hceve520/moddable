@@ -61,7 +61,7 @@ static void PiuPortOutlineOpDrawAux(void* it, PiuView* view, PiuCoordinate x, Pi
 
 	xsBeginHost((*view)->the);
 	xsResult = xsReference((*self)->outline);
-	outline = xsGetHostData(xsResult);
+	outline = xsGetHostDataValidate(xsResult, xs_outline_destructor);
 	if ((*self)->kind == kPiuPortOutlineGradient) {
 		PocoLinearGradientRecord gradient;
 		xsResult = xsReference((*self)->gradient);
