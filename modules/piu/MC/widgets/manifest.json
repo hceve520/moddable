@@ -1,6 +1,6 @@
 {
 	"include": [
-		"$(MODDABLE)/modules/piu/MC/outline/manifest.json"
+		"$(MODDABLE)/modules/piu/MC/outline/manifest_round.json"
 	],
 	"modules": {
 		"piu/widgets": "./piuWidgets"

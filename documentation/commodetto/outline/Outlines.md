@@ -229,9 +229,11 @@ The [Poco renderer](https://github.com/Moddable-OpenSource/moddable/blob/public/
 
 A **linear** gradient descriptor is an object with `x0`, `y0`, `x1`, `y1` (in the same coordinate space as the outline path) and a `stops` array. Each stop is `{ offset, r, g, b }` with `offset` from 0 to 1, or `{ offset, color }` using a value from `makeColor`. Up to 8 stops are supported. Use `Poco.prototype.makeLinearGradient(x0, y0, x1, y1, stops)` to build the descriptor.
 
-An **angular** (conic) gradient — used by ring gauges — is an object with `type: "angular"` (or `"conic"`), `cx`, `cy`, `startAngle`, and either `sweepAngle` or `endAngle` (radians), plus `stops`. Use `Poco.prototype.makeAngularGradient(cx, cy, startAngle, sweepAngle, stops)`.
+An **angular** (conic) gradient — used by ring gauges — is an object with `type: "angular"` (or `"conic"`), `cx`, `cy`, `startAngle`, and either `sweepAngle` or `endAngle` (radians), plus `stops`. Use `Poco.prototype.makeAngularGradient(cx, cy, startAngle, sweepAngle, stops[, fast])`. Set `fast: true` (6th argument or descriptor field) for coarser octant sampling on secondary gauges.
 
-Rendering builds a 256-entry color LUT once per draw band; vertical and horizontal linear gradients use scanline/span fast paths, and angular sampling uses a float `atan2` approximation instead of double `libm` `atan2`.
+Rendering builds a 256-entry color LUT once per draw band; vertical and horizontal linear gradients use scanline/span fast paths. Angular sampling uses fixed-point turn arithmetic (no per-pixel soft-float `atan2`). Gradient descriptors are stored in a per-frame slot table on the Outline renderer; each display-list command keeps only a slot index, so many gradient Outlines fit in a modest `displayListLength`.
+
+Use `poco.getOutlineStats()` / `poco.resetOutlineStats()` while tuning dense UIs (`fills`, `gradients`, `slotsUsed`, `slotsPeak`).
 
 ```javascript
 const path = Outline.RoundRectPath(0, 0, 200, 60, 15);
@@ -384,7 +386,13 @@ Prototype inherits from `Content.prototype`.
 
 The Piu `RoundContent` object is a `container` that draws a rounded rectangle using Outline, then lays out children on top. It is the MCU counterpart to the desktop `RoundContent`, extended with Skin-driven gradients.
 
-Include the Outline Piu manifest:
+Include the RoundContent manifest (pulls in Shape + Outline):
+
+```json
+"include": "$(MODDABLE)/modules/piu/MC/outline/manifest_round.json"
+```
+
+Or the full Outline Piu bundle (`shape` + `RoundContent` + `PathPort`):
 
 ```json
 "include": "$(MODDABLE)/modules/piu/MC/outline/manifest.json"
@@ -395,6 +403,8 @@ Import:
 ```javascript
 import {} from "piu/RoundContent";
 ```
+
+`RoundContent` caches fill/stroke Outline geometry while width, height, radius, and border are unchanged, so invalidate/redraw of static rounded panels does not rebuild paths every frame. Changing `radius` / `border` clears the cache. Prefer bitmap skins for fully static chrome when Outline is unnecessary.
 
 Color `Skin` objects may declare `radius`, `fillGradient`, and `strokeGradient`. `RoundContent` uses those values when its own `radius` / gradient properties are not set.
 
@@ -444,6 +454,14 @@ Prototype inherits from `Container.prototype`.
 ## Draw using Piu PathPort
 
 `PathPort` extends Piu `Port` with a lightweight Canvas-like path API for custom drawing inside `onDraw`. It is **not** a full `CanvasRenderingContext2D`; path construction maps to `Outline.CanvasPath`, and `fill` / `stroke` build Outline objects drawn through Poco.
+
+Include only PathPort when you do not need RoundContent:
+
+```json
+"include": "$(MODDABLE)/modules/piu/MC/outline/manifest_path.json"
+```
+
+**MCU tips:** keep one PathPort instance; for static shapes cache an `Outline` and call `drawOutline` each frame; avoid `beginPath`/`fill`/`stroke` for every gauge on every tick — those allocate a new path/Outline each call; reuse gradient descriptor objects.
 
 ```javascript
 import { PathPort } from "piu/PortPath";
@@ -634,4 +652,20 @@ let ClockApplication = Application.template($ => ({
 }));
 export default new ClockApplication({}, { displayListLength:4096, touchCount:1, pixels: 240 * 64 });
 ```
+
+## ESP32 UI budget (Outline / Piu)
+
+Guidelines for dense monitoring screens (many gauges, rounded panels, gradients):
+
+| Resource | Guidance |
+| --- | --- |
+| `displayListLength` | Start at 4096–8192 for multi-gauge screens. Gradient Outline commands are slim (slot index, not a full gradient record), but each Outline still needs a command + held path. Watch `poco.getOutlineStats().slotsPeak` and overflow errors from `poco.end()`. |
+| `pixels` (Piu) | Band height × width × bytes/pixel. Larger bands mean fewer passes over the display list (less repeated Outline work) but more RAM. Typical: `width * 16` … `width * 64`. |
+| Dynamic gradient Outlines | Prefer a small number of primary angular rings; secondary gauges can use `makeAngularGradient(..., true)` (`fast`) or solid colors. Cache track/background Outlines; rebuild only the value arc. |
+| RoundContent | Geometry is cached while size/radius/border are stable — good for panels. Do not recreate RoundContent trees every frame. |
+| PathPort | One instance; cache static Outlines; do not `beginPath`+`stroke` per gauge per tick if the path is unchanged. |
+| Flash / preload | Use `manifest_shape.json`, `manifest_round.json`, or `manifest_path.json` instead of the full Outline Piu bundle when possible. |
+| Invalidate | Prefer local `invalidate(x,y,w,h)` over full-screen redraws so unused gauges are not re-rasterized. |
+
+Rough flash: Outline + FreeType raster baseline is on the order of 80–100KB; RoundContent / PathPort / widgets add a smaller increment on top. Measure with your `mcconfig` map file.
 

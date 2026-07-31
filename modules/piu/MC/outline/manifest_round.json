@@ -1,0 +1,9 @@
+{
+	"include": "./manifest_shape.json",
+	"modules": {
+		"piu/RoundContent": "./piuRoundContent"
+	},
+	"preload": [
+		"piu/RoundContent"
+	]
+}

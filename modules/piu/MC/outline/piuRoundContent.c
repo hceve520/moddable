@@ -137,12 +137,20 @@ static void PiuRoundContentEnsureOutlines(PiuRoundContent* self)
 			border = maxBorder;
 	}
 
+	/* Reuse fill/stroke Outline geometry while size, radius, and border are unchanged. */
 	if (((*self)->cacheWidth == width)
 			&& ((*self)->cacheHeight == height)
 			&& ((*self)->cacheRadius == radius)
 			&& ((*self)->cacheBorder == border)
 			&& (*self)->outerOutline)
 		return;
+
+	(*self)->outerOutline = NULL;
+	(*self)->innerOutline = NULL;
+	(*self)->cacheWidth = 0;
+	(*self)->cacheHeight = 0;
+	(*self)->cacheRadius = 0;
+	(*self)->cacheBorder = 0;
 
 	xsBeginHost(the);
 	xsVars(3);
