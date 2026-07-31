@@ -4,9 +4,13 @@
 	},
 	"include": "$(COMMODETTO_OUTLINE)/manifest.json",
 	"modules": {
-		"piu/shape": "./piuShape"
+		"piu/shape": "./piuShape",
+		"piu/RoundContent": "./piuRoundContent",
+		"piu/PortPath": "./piuPortPath"
 	},
 	"preload": [
-		"piu/shape"
+		"piu/shape",
+		"piu/RoundContent",
+		"piu/PortPath"
 	]
 }

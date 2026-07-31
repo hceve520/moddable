@@ -225,6 +225,9 @@ struct PiuSkinStruct {
 			PiuColorRecord color[4];
 		} pattern;
 	} data;
+	PiuDimension radius;			/* color skins: rounded corner radius in pixels */
+	void* fillGradient;				/* color skins: optional gradient descriptor ref */
+	void* strokeGradient;			/* color skins: optional gradient descriptor ref */
 };
 
 extern void PiuSkinDraw(PiuSkin* self, PiuView* view, PiuRectangle bounds, PiuVariant variant, PiuState state, PiuAlignment horizontal, PiuAlignment vertical);

@@ -42,10 +42,13 @@ export class Skin extends Native("PiuSkinDelete") {
 	get bounds() { return native("PiuSkin_get_bounds").call(this); }
 	get color() { return native("PiuSkin_get_color").call(this); }
 	get fill() { return native("PiuSkin_get_fill").call(this); }
+	get fillGradient() { return native("PiuSkin_get_fillGradient").call(this); }
 	get left() { return native("PiuSkin_get_left").call(this); }
+	get radius() { return native("PiuSkin_get_radius").call(this); }
 	get right() { return native("PiuSkin_get_right").call(this); }
 	get states() { return native("PiuSkin_get_states").call(this); }
 	get stroke() { return native("PiuSkin_get_stroke").call(this); }
+	get strokeGradient() { return native("PiuSkin_get_strokeGradient").call(this); }
 	get texture() { return native("PiuSkin_get_texture").call(this); }
 	get tiles() { return native("PiuSkin_get_tiles").call(this); }
 	get top() { return native("PiuSkin_get_top").call(this); }

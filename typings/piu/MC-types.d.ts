@@ -201,10 +201,27 @@ export interface TextureConstructor {
     template: TemplateStyleFactory<TextureConstructor>;
   }
 
+export interface LinearGradientStop {
+    offset: number;
+    r?: number;
+    g?: number;
+    b?: number;
+    color?: number;
+  }
+export interface LinearGradient {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    stops: Array<LinearGradientStop>;
+  }
 export interface Skin {
     borders: Coordinates;
     fill: Color | Color[];
     stroke: Color | Color[];
+    fillGradient?: LinearGradient | null;
+    strokeGradient?: LinearGradient | null;
+    radius?: number;
     texture: Texture;
     color: Color;
     bounds: Bounds;
@@ -237,6 +254,9 @@ export interface ColorSkinDictionary {
     borders?: Coordinates;
     fill?: Color | Color[];
     stroke?: Color | Color[];
+    radius?: number;
+    fillGradient?: LinearGradient;
+    strokeGradient?: LinearGradient;
   }
 export type SkinDictionary = ColorSkinDictionary | TextureSkinDictionary;
 
