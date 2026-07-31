@@ -50,6 +50,7 @@ declare module "piu/widgets" {
   export class SliderBehavior extends Behavior {}
 
   interface ButtonDictionary extends ContainerDictionary {
+    data?: any;
     string?: string;
     skin?: Skin;
     style?: Style;
@@ -64,14 +65,17 @@ declare module "piu/widgets" {
     value?: boolean;
   }
   interface ProgressDictionary extends ContainerDictionary {
+    data?: RangeData;
     trackSkin?: Skin;
     fillSkin?: Skin;
   }
   interface SwitchDictionary extends ContainerDictionary {
+    data?: SwitchData;
     barSkin?: Skin;
     buttonSkin?: Skin;
   }
   interface SliderDictionary extends ContainerDictionary {
+    data?: RangeData;
     trackSkin?: Skin;
     fillSkin?: Skin;
     thumbSkin?: Skin;
@@ -83,18 +87,18 @@ declare module "piu/widgets" {
     template<T>(this: T, fn: (arg: object) => ButtonDictionary): T;
   }
   interface ProgressBarConstructor {
-    new(behaviorData?: RangeData, dictionary?: ProgressDictionary): Container;
-    (behaviorData?: RangeData, dictionary?: ProgressDictionary): Container;
+    new(behaviorData?: any, dictionary?: ProgressDictionary): Container;
+    (behaviorData?: any, dictionary?: ProgressDictionary): Container;
     template<T>(this: T, fn: (arg: object) => ProgressDictionary): T;
   }
   interface SwitchConstructor {
-    new(behaviorData?: SwitchData, dictionary?: SwitchDictionary): Container;
-    (behaviorData?: SwitchData, dictionary?: SwitchDictionary): Container;
+    new(behaviorData?: any, dictionary?: SwitchDictionary): Container;
+    (behaviorData?: any, dictionary?: SwitchDictionary): Container;
     template<T>(this: T, fn: (arg: object) => SwitchDictionary): T;
   }
   interface SliderConstructor {
-    new(behaviorData?: RangeData, dictionary?: SliderDictionary): Container;
-    (behaviorData?: RangeData, dictionary?: SliderDictionary): Container;
+    new(behaviorData?: any, dictionary?: SliderDictionary): Container;
+    (behaviorData?: any, dictionary?: SliderDictionary): Container;
     template<T>(this: T, fn: (arg: object) => SliderDictionary): T;
   }
 
