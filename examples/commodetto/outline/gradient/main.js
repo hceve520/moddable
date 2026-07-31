@@ -1,5 +1,5 @@
 /*
-	Linear gradient fill for Outline shapes (Poco).
+	Linear and angular gradient fill for Outline shapes (Poco).
 */
 import Poco from "commodetto/Poco";
 import {Outline} from "commodetto/outline";
@@ -41,4 +41,18 @@ poco.begin();
 		],
 	};
 	poco.blendOutline(dialGradient, 255, dialOutline, 160, 100);
+
+	/* Ring gauge-style angular gradient along the arc */
+	const ringPath = new Outline.CanvasPath();
+	const start = 0.55;
+	const sweep = Math.PI * 2 - 1.1;
+	ringPath.arc(60, 60, 48, start, start + sweep);
+	const ringOutline = Outline.stroke(ringPath, 14, Outline.LINECAP_ROUND);
+	const ringGradient = poco.makeAngularGradient(60, 60, start, sweep, [
+		{ offset: 0, r: 91, g: 44, b: 255 },
+		{ offset: 0.4, r: 155, g: 77, b: 255 },
+		{ offset: 0.75, r: 224, g: 64, b: 251 },
+		{ offset: 1, r: 255, g: 45, b: 149 },
+	]);
+	poco.blendOutline(ringGradient, 255, ringOutline, 90, 200);
 poco.end();

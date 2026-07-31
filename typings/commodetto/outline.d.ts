@@ -111,9 +111,22 @@ declare module "commodetto/Poco" {
     stops: Array<LinearGradientStop>
   }
 
+  interface AngularGradient {
+    type: "angular" | "conic"
+    cx: number
+    cy: number
+    startAngle: number
+    sweepAngle?: number
+    endAngle?: number
+    stops: Array<LinearGradientStop>
+  }
+
+  type OutlineGradient = LinearGradient | AngularGradient
+
   interface PocoPrototype {
-    blendOutline(colorOrGradient: number | LinearGradient, blend: number, outline: Outline, x?: number, y?: number): void
+    blendOutline(colorOrGradient: number | OutlineGradient, blend: number, outline: Outline, x?: number, y?: number): void
     blendPolygon(color: number, blend: number, ...points: Array<number>): void
     makeLinearGradient(x0: number, y0: number, x1: number, y1: number, stops: Array<LinearGradientStop>): LinearGradient
+    makeAngularGradient(cx: number, cy: number, startAngle: number, sweepAngle: number, stops: Array<LinearGradientStop>): AngularGradient
   }
 }

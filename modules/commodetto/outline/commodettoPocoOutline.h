@@ -53,12 +53,16 @@ typedef struct {
 	int32_t adx;
 	int32_t ady;
 	uint32_t len2;
+	uint32_t len2Scale;		/* (255 << 24) / len2 — maps num→t without division */
 	float startAngle;		/* angular: radians */
 	float sweepAngle;		/* angular: radians, same direction as CanvasPath.arc */
+	float invSweep;			/* angular: 255 / |sweepAngle| */
 } PocoLinearGradientRecord;
 typedef PocoLinearGradientRecord *PocoLinearGradient;
 
 extern void PocoLinearGradientPrepare(PocoLinearGradient gradient);
+extern void PocoLinearGradientBuildLUT(const PocoLinearGradientRecord *gradient, PocoPixel *lut /*[256]*/);
+extern uint8_t PocoLinearGradientSampleT(const PocoLinearGradientRecord *gradient, int x, int y);
 extern PocoPixel PocoLinearGradientSamplePixel(const PocoLinearGradientRecord *gradient, int x, int y);
 
 extern void PocoOutlineFill(Poco poco, PocoColor color, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy);

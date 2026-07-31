@@ -32,4 +32,12 @@ Poco.prototype.makeLinearGradient = function(x0, y0, x1, y1, stops) {
 	return { x0, y0, x1, y1, stops };
 };
 
+/**
+ * Build an angular (conic) gradient descriptor for ring gauges.
+ * Angles are radians; sweep follows CanvasPath.arc direction.
+ */
+Poco.prototype.makeAngularGradient = function(cx, cy, startAngle, sweepAngle, stops) {
+	return { type: "angular", cx, cy, startAngle, sweepAngle, stops };
+};
+
 export default Object.freeze({});
