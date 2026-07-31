@@ -35,9 +35,20 @@ Poco.prototype.makeLinearGradient = function(x0, y0, x1, y1, stops) {
 /**
  * Build an angular (conic) gradient descriptor for ring gauges.
  * Angles are radians; sweep follows CanvasPath.arc direction.
+ * Optional `fast` enables coarser octant sampling for secondary gauges.
  */
-Poco.prototype.makeAngularGradient = function(cx, cy, startAngle, sweepAngle, stops) {
-	return { type: "angular", cx, cy, startAngle, sweepAngle, stops };
+Poco.prototype.makeAngularGradient = function(cx, cy, startAngle, sweepAngle, stops, fast) {
+	const descriptor = { type: "angular", cx, cy, startAngle, sweepAngle, stops };
+	if (fast)
+		descriptor.fast = true;
+	return descriptor;
 };
+
+/**
+ * Outline draw counters for tuning dense UIs (display-list / gradient slot pressure).
+ * { fills, gradients, slotsUsed, slotsPeak }
+ */
+Poco.prototype.getOutlineStats = function() { return native("xs_outlinerenderer_getOutlineStats").call(this); };
+Poco.prototype.resetOutlineStats = function() { return native("xs_outlinerenderer_resetOutlineStats").call(this); };
 
 export default Object.freeze({});

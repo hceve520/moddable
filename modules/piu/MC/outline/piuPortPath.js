@@ -23,6 +23,16 @@ import { Outline } from "commodetto/outline";
 /*
 	PathPort — Port with a lightweight Canvas-like path API.
 	Use only inside onDraw(). Not a full CanvasRenderingContext2D.
+
+	Performance notes for MCU / dense dashboards:
+	- Prefer one long-lived PathPort; do not create a new PathPort every frame.
+	- beginPath() allocates a fresh CanvasPath. For static geometry, build an
+	  Outline once (Outline.fill / Outline.stroke) and call drawOutline() each
+	  frame instead of fill()/stroke().
+	- fill() and stroke() allocate a new Outline every call — fine for a few
+	  dynamic paths, expensive if repeated for many gauges per frame.
+	- Gradients passed as fillStyle/strokeStyle are converted each draw; reuse
+	  the same descriptor object across frames.
 */
 
 function state(port) {

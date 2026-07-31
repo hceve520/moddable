@@ -22,10 +22,23 @@ typedef struct {
 	uint32_t	pitch;
 } xsSpanInfoRecord, *xsSpanInfo;
 
+#define kPocoOutlineGradientSlotInitial (16)
+#define kPocoOutlineGradientSlotMax (256)
+#define kPocoOutlineTurnFull (65536u)	/* one turn ≡ 2π */
+
 typedef struct {
 	FT_Raster raster;
 	FT_Raster_Params params;
 	int pitch;
+
+	/* Gradient records live here for the current display-list frame; commands store slot indices only. */
+	PocoLinearGradientRecord *gradientSlots;
+	uint16_t gradientSlotCount;
+	uint16_t gradientSlotCapacity;
+	Poco gradPoco;
+	char *gradDisplayList;
+	char *gradHighWater;
+
 	uint8_t renderPool[1];
 } xsOutlineRendererRecord, *xsOutlineRenderer;
 
@@ -34,10 +47,15 @@ static void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension 
 static void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user);
 static void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user);
 static void outlineFillCommon(Poco poco, uint8_t paintKind, PocoColor color, const PocoLinearGradientRecord *gradient, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy);
+static uint16_t outlineAllocGradientSlot(Poco poco, xsOutlineRenderer or, const PocoLinearGradientRecord *gradient);
 
 void PocoLinearGradientFromSlot(xsMachine *the, xsSlot *slot, PocoLinearGradient gradient);
 
 static xsOutlineRenderer gxOutlineRenderer = NULL;
+
+static uint32_t gOutlineFillCount = 0;
+static uint32_t gOutlineGradientCount = 0;
+static uint32_t gOutlineGradientSlotsPeak = 0;
 
 xsOutlineRenderer PocoOutlineRenderer()
 {
@@ -60,13 +78,97 @@ typedef struct {
 	PocoPixel color;
 	uint8_t blend;
 	uint8_t paintKind;
-	PocoLinearGradientRecord gradient;
+	uint16_t gradientSlot;	/* index into or->gradientSlots when paintKind is gradient */
 } xsOutlineRenderRecord, *xsOutlineRender;
 
 #if defined(__GNUC__) || defined(__clang__)
 _Static_assert(sizeof(xsOutlineRenderRecord) <= 255, "outline render record exceeds PocoDrawExternal limit");
 #endif
 
+void PocoOutlineStatsGet(uint32_t *fills, uint32_t *gradients, uint32_t *slotsUsed, uint32_t *slotsPeak)
+{
+	xsOutlineRenderer or = gxOutlineRenderer;
+	if (fills)
+		*fills = gOutlineFillCount;
+	if (gradients)
+		*gradients = gOutlineGradientCount;
+	if (slotsUsed)
+		*slotsUsed = or ? or->gradientSlotCount : 0;
+	if (slotsPeak)
+		*slotsPeak = gOutlineGradientSlotsPeak;
+}
+
+void PocoOutlineStatsReset(void)
+{
+	gOutlineFillCount = 0;
+	gOutlineGradientCount = 0;
+	gOutlineGradientSlotsPeak = 0;
+}
+
+/*
+	Reset gradient slots when the display list is rewound (new PocoDrawingBegin)
+	or when the Poco instance / list buffer identity changes.
+*/
+static void outlineSyncGradientFrame(Poco poco, xsOutlineRenderer or)
+{
+	char *next = (char *)poco->next;
+
+	if ((or->gradPoco != poco) || (or->gradDisplayList != poco->displayList)) {
+		or->gradPoco = poco;
+		or->gradDisplayList = poco->displayList;
+		or->gradientSlotCount = 0;
+		or->gradHighWater = next;
+		return;
+	}
+
+	if ((NULL != or->gradHighWater) && ((next < or->gradHighWater) || (next == poco->displayList)))
+		or->gradientSlotCount = 0;
+
+	if (next > or->gradHighWater)
+		or->gradHighWater = next;
+}
+
+static uint16_t outlineAllocGradientSlot(Poco poco, xsOutlineRenderer or, const PocoLinearGradientRecord *gradient)
+{
+	uint16_t index;
+
+	outlineSyncGradientFrame(poco, or);
+
+	if (or->gradientSlotCount >= or->gradientSlotCapacity) {
+		uint16_t capacity = or->gradientSlotCapacity ? (uint16_t)(or->gradientSlotCapacity << 1) : kPocoOutlineGradientSlotInitial;
+		PocoLinearGradientRecord *slots;
+
+		if (capacity > kPocoOutlineGradientSlotMax)
+			capacity = kPocoOutlineGradientSlotMax;
+		if (or->gradientSlotCount >= capacity) {
+			/* Exhausted — reuse last slot (last writer wins). Prefer larger displayListLength over silent corruption. */
+			index = (uint16_t)(capacity - 1);
+			or->gradientSlots[index] = *gradient;
+			return index;
+		}
+		slots = c_realloc(or->gradientSlots, capacity * sizeof(PocoLinearGradientRecord));
+		if (!slots) {
+			static PocoLinearGradientRecord emergency;
+			emergency = *gradient;
+			if (!or->gradientSlots) {
+				or->gradientSlots = &emergency;
+				or->gradientSlotCapacity = kPocoOutlineGradientSlotMax; /* avoid realloc of static */
+				or->gradientSlotCount = 1;
+				return 0;
+			}
+			or->gradientSlots[0] = *gradient;
+			return 0;
+		}
+		or->gradientSlots = slots;
+		or->gradientSlotCapacity = capacity;
+	}
+
+	index = or->gradientSlotCount++;
+	or->gradientSlots[index] = *gradient;
+	if (or->gradientSlotCount > gOutlineGradientSlotsPeak)
+		gOutlineGradientSlotsPeak = or->gradientSlotCount;
+	return index;
+}
 void bufferToFTOutline(void *buffer, struct FT_Outline_ *outline)
 {
 	PocoOutline header = (PocoOutline)buffer;
@@ -85,27 +187,14 @@ void bufferToFTOutline(void *buffer, struct FT_Outline_ *outline)
 void PocoLinearGradientPrepare(PocoLinearGradient gradient)
 {
 	gradient->len2Scale = 0;
-	gradient->invSweep = 0;
+	gradient->invSweepScale = 0;
 
 	if (gradient->flags & kPocoGradientFlagAngular) {
-		float twoPi = 2.0f * M_PI_F;
-		float start = gradient->startAngle;
-		float sweep = gradient->sweepAngle;
-
 		gradient->adx = 0;
 		gradient->ady = 0;
 		gradient->len2 = 1;	/* non-zero so single-stop short-circuit still works via stopCount */
-
-		if (sweep < 0)
-			sweep = -sweep;
-		gradient->sweepAngle = sweep;
-
-		while (start < 0)
-			start += twoPi;
-		while (start >= twoPi)
-			start -= twoPi;
-		gradient->startAngle = start;
-		gradient->invSweep = (sweep > 0) ? (255.0f / sweep) : 0;
+		if (gradient->sweepTurn)
+			gradient->invSweepScale = (255u << 16) / gradient->sweepTurn;
 		return;
 	}
 
@@ -119,6 +208,132 @@ void PocoLinearGradientPrepare(PocoLinearGradient gradient)
 		gradient->flags |= kPocoGradientFlagHorizontal;
 	if (gradient->len2)
 		gradient->len2Scale = (uint32_t)(((uint64_t)255 << 24) / gradient->len2);
+}
+
+static void PocoAngularSetAngles(PocoLinearGradient gradient, float start, float sweep)
+{
+	float twoPi = 2.0f * M_PI_F;
+	uint32_t startTurn, sweepTurn;
+
+	if (sweep < 0)
+		sweep = -sweep;
+	while (start < 0)
+		start += twoPi;
+	while (start >= twoPi)
+		start -= twoPi;
+
+	startTurn = (uint32_t)(start * ((float)kPocoOutlineTurnFull / twoPi) + 0.5f);
+	if (startTurn >= kPocoOutlineTurnFull)
+		startTurn = 0;
+	sweepTurn = (uint32_t)(sweep * ((float)kPocoOutlineTurnFull / twoPi) + 0.5f);
+	if (sweepTurn > kPocoOutlineTurnFull)
+		sweepTurn = kPocoOutlineTurnFull;
+
+	gradient->startTurn = startTurn;
+	gradient->sweepTurn = sweepTurn;
+}
+
+/*
+	Integer atan2 → turn units [0, 65536). First-octant uses a linear fraction
+	(adequate for ring-gauge shading; avoids soft-float atan2 per pixel).
+*/
+static uint32_t pocoAtan2Turn(int32_t y, int32_t x)
+{
+	uint32_t ax, ay, angle;
+
+	if ((0 == x) && (0 == y))
+		return 0;
+
+	ax = (uint32_t)((x < 0) ? -x : x);
+	ay = (uint32_t)((y < 0) ? -y : y);
+
+	if (ax >= ay) {
+		/* 0..45° → 0..8192 */
+		angle = ax ? ((ay << 13) / ax) : 0;
+	}
+	else {
+		/* 45..90° → 8192..16384 */
+		angle = 16384u - (ay ? ((ax << 13) / ay) : 0);
+	}
+
+	if (x < 0)
+		angle = 32768u - angle;
+	if (y < 0)
+		angle = kPocoOutlineTurnFull - angle;
+	if (angle >= kPocoOutlineTurnFull)
+		angle -= kPocoOutlineTurnFull;
+	return angle;
+}
+
+/* Coarser 8-way angular sample for secondary gauges (flag AngularFast). */
+static uint32_t pocoAtan2TurnFast(int32_t y, int32_t x)
+{
+	uint32_t ax, ay;
+
+	if ((0 == x) && (0 == y))
+		return 0;
+	ax = (uint32_t)((x < 0) ? -x : x);
+	ay = (uint32_t)((y < 0) ? -y : y);
+
+	/* Quantize to octant centers: 0,45,90,... */
+	if (ay * 2 < ax) {
+		/* near 0° or 180° */
+		return (x >= 0) ? 0 : 32768u;
+	}
+	if (ax * 2 < ay) {
+		/* near 90° or 270° */
+		return (y >= 0) ? 16384u : 49152u;
+	}
+	if ((x >= 0) && (y >= 0))
+		return 8192u;
+	if ((x < 0) && (y >= 0))
+		return 24576u;
+	if ((x < 0) && (y < 0))
+		return 40960u;
+	return 57344u;
+}
+
+static uint32_t PocoLinearGradientTFromNum(const PocoLinearGradientRecord *gradient, int64_t num);
+
+uint8_t PocoLinearGradientSampleT(const PocoLinearGradientRecord *gradient, int x, int y)
+{
+	if (0 == gradient->stopCount)
+		return 0;
+	if (1 == gradient->stopCount)
+		return 0;
+
+	if (gradient->flags & kPocoGradientFlagAngular) {
+		int32_t dx = (int32_t)x - (int32_t)gradient->x0;
+		int32_t dy = (int32_t)y - (int32_t)gradient->y0;
+		uint32_t ang = (gradient->flags & kPocoGradientFlagAngularFast)
+				? pocoAtan2TurnFast(dy, dx)
+				: pocoAtan2Turn(dy, dx);
+		uint32_t rel = (ang - gradient->startTurn) & (kPocoOutlineTurnFull - 1);
+		uint32_t sweep = gradient->sweepTurn;
+		uint32_t t;
+
+		if (0 == sweep)
+			t = 0;
+		else if (rel > sweep) {
+			uint32_t after = rel - sweep;
+			uint32_t before = kPocoOutlineTurnFull - rel;
+			t = (after < before) ? 255 : 0;
+		}
+		else {
+			t = (rel * gradient->invSweepScale) >> 16;
+			if (t > 255)
+				t = 255;
+		}
+		return (uint8_t)t;
+	}
+
+	if (0 == gradient->len2)
+		return 0;
+
+	return (uint8_t)PocoLinearGradientTFromNum(
+		gradient,
+		(int64_t)(x - gradient->x0) * gradient->adx + (int64_t)(y - gradient->y0) * gradient->ady
+	);
 }
 
 static void PocoGradientShadeFromT(const PocoLinearGradientRecord *gradient, uint32_t t, uint8_t *r, uint8_t *g, uint8_t *b)
@@ -192,68 +407,6 @@ static uint32_t PocoLinearGradientTFromNum(const PocoLinearGradientRecord *gradi
 	return (t > 255) ? 255 : t;
 }
 
-/*
-	Compact atan2 approximation in float (good to ~0.01 rad).
-	Avoids double libm atan2 on targets where double is soft-float.
-*/
-static float pocoFastAtan2f(float y, float x)
-{
-	float absY, angle, r;
-
-	if ((0 == x) && (0 == y))
-		return 0;
-
-	absY = (y < 0) ? -y : y;
-	if (x >= 0) {
-		r = (x - absY) / (x + absY);
-		angle = 0.78539816f - 0.78539816f * r;	/* pi/4 */
-	}
-	else {
-		r = (x + absY) / (absY - x);
-		angle = 2.35619449f - 0.78539816f * r;	/* 3*pi/4 */
-	}
-	return (y < 0) ? -angle : angle;
-}
-
-uint8_t PocoLinearGradientSampleT(const PocoLinearGradientRecord *gradient, int x, int y)
-{
-	if (0 == gradient->stopCount)
-		return 0;
-	if (1 == gradient->stopCount)
-		return 0;
-
-	if (gradient->flags & kPocoGradientFlagAngular) {
-		float ang = pocoFastAtan2f((float)(y - gradient->y0), (float)(x - gradient->x0));
-		float rel = ang - gradient->startAngle;
-		float sweep = gradient->sweepAngle;
-		float twoPi = 2.0f * M_PI_F;
-		uint32_t t;
-
-		while (rel < 0)
-			rel += twoPi;
-		while (rel >= twoPi)
-			rel -= twoPi;
-		if (sweep <= 0)
-			t = 0;
-		else if (rel > sweep)
-			t = (rel - sweep < twoPi - rel) ? 255 : 0;
-		else {
-			t = (uint32_t)(rel * gradient->invSweep + 0.5f);
-			if (t > 255)
-				t = 255;
-		}
-		return (uint8_t)t;
-	}
-
-	if (0 == gradient->len2)
-		return 0;
-
-	return (uint8_t)PocoLinearGradientTFromNum(
-		gradient,
-		(int64_t)(x - gradient->x0) * gradient->adx + (int64_t)(y - gradient->y0) * gradient->ady
-	);
-}
-
 static void PocoLinearGradientSampleRGB(const PocoLinearGradientRecord *gradient, int x, int y, uint8_t *r, uint8_t *g, uint8_t *b)
 {
 	if (0 == gradient->stopCount) {
@@ -316,21 +469,29 @@ void PocoLinearGradientFromSlot(xsMachine *the, xsSlot *slot, PocoLinearGradient
 		angular = 1;
 
 	if (angular) {
+		float startAngle, sweepAngle;
+
 		xsmcGet(xsVar(0), *slot, xsID_cx);
 		gradient->x0 = (int16_t)xsmcToInteger(xsVar(0));
 		xsmcGet(xsVar(0), *slot, xsID_cy);
 		gradient->y0 = (int16_t)xsmcToInteger(xsVar(0));
 		xsmcGet(xsVar(0), *slot, xsID_startAngle);
-		gradient->startAngle = (float)xsmcToNumber(xsVar(0));
+		startAngle = (float)xsmcToNumber(xsVar(0));
 		if (xsmcHas(*slot, xsID_sweepAngle)) {
 			xsmcGet(xsVar(0), *slot, xsID_sweepAngle);
-			gradient->sweepAngle = (float)xsmcToNumber(xsVar(0));
+			sweepAngle = (float)xsmcToNumber(xsVar(0));
 		}
 		else {
 			xsmcGet(xsVar(0), *slot, xsID_endAngle);
-			gradient->sweepAngle = (float)xsmcToNumber(xsVar(0)) - gradient->startAngle;
+			sweepAngle = (float)xsmcToNumber(xsVar(0)) - startAngle;
 		}
+		PocoAngularSetAngles(gradient, startAngle, sweepAngle);
 		gradient->flags = kPocoGradientFlagAngular;
+		if (xsmcHas(*slot, xsID_fast)) {
+			xsmcGet(xsVar(0), *slot, xsID_fast);
+			if (xsmcToBoolean(xsVar(0)))
+				gradient->flags |= kPocoGradientFlagAngularFast;
+		}
 	}
 	else {
 		xsmcGet(xsVar(0), *slot, xsID_x0);
@@ -416,16 +577,21 @@ void xs_outlinerenderer_blendOutline(xsMachine *the)
 
 	orr.or = or;
 	orr.blend = (uint8_t)xsmcToInteger(xsArg(1));
+	orr.gradientSlot = 0;
 	paintType = xsmcTypeOf(xsArg(0));
 	if ((xsIntegerType == paintType) || (xsNumberType == paintType)) {
 		orr.paintKind = kPocoPaintSolid;
 		orr.color = (PocoPixel)xsmcToInteger(xsArg(0));
 	}
 	else {
+		PocoLinearGradientRecord gradient;
 		orr.paintKind = kPocoPaintLinearGradient;
 		orr.color = 0;
-		PocoLinearGradientFromSlot(the, &xsArg(0), &orr.gradient);
+		PocoLinearGradientFromSlot(the, &xsArg(0), &gradient);
+		orr.gradientSlot = outlineAllocGradientSlot(poco, or, &gradient);
+		gOutlineGradientCount += 1;
 	}
+	gOutlineFillCount += 1;
 
 	if (xsmcArgc >= 4) {
 		dx = xsmcToInteger(xsArg(3));
@@ -491,6 +657,28 @@ void xs_outlinerenderer_blendOutline(xsMachine *the)
 	PocoHold(the, poco, xsmcToReference(xsArg(2)));
 }
 
+void xs_outlinerenderer_getOutlineStats(xsMachine *the)
+{
+	uint32_t fills, gradients, slotsUsed, slotsPeak;
+
+	xsmcVars(1);
+	PocoOutlineStatsGet(&fills, &gradients, &slotsUsed, &slotsPeak);
+	xsResult = xsNewObject();
+	xsmcSetInteger(xsVar(0), fills);
+	xsmcSet(xsResult, xsID_fills, xsVar(0));
+	xsmcSetInteger(xsVar(0), gradients);
+	xsmcSet(xsResult, xsID_gradients, xsVar(0));
+	xsmcSetInteger(xsVar(0), slotsUsed);
+	xsmcSet(xsResult, xsID_slotsUsed, xsVar(0));
+	xsmcSetInteger(xsVar(0), slotsPeak);
+	xsmcSet(xsResult, xsID_slotsPeak, xsVar(0));
+}
+
+void xs_outlinerenderer_resetOutlineStats(xsMachine *the)
+{
+	PocoOutlineStatsReset();
+}
+
 
 typedef struct {
 	PocoPixel		*dst;
@@ -531,7 +719,10 @@ void doOutline(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	os.paintKind = orr->paintKind;
 	os.haveLut = 0;
 	if (kPocoPaintLinearGradient == orr->paintKind) {
-		os.gradient = orr->gradient;
+		if (or->gradientSlots && (orr->gradientSlot < or->gradientSlotCount))
+			os.gradient = or->gradientSlots[orr->gradientSlot];
+		else
+			c_memset(&os.gradient, 0, sizeof(os.gradient));
 		PocoLinearGradientBuildLUT(&os.gradient, os.lut);
 		os.haveLut = 1;
 	}
@@ -1285,8 +1476,12 @@ static void outlineFillCommon(Poco poco, uint8_t paintKind, PocoColor color, con
 	orr.paintKind = paintKind;
 	orr.color = color;
 	orr.blend = blend;
-	if (kPocoPaintLinearGradient == paintKind)
-		orr.gradient = *gradient;
+	orr.gradientSlot = 0;
+	if (kPocoPaintLinearGradient == paintKind) {
+		orr.gradientSlot = outlineAllocGradientSlot(poco, orr.or, gradient);
+		gOutlineGradientCount += 1;
+	}
+	gOutlineFillCount += 1;
 	bufferToFTOutline(pOutline, &orr.outline);
 	
 #if (90 == kPocoRotation) || (180 == kPocoRotation) || (270 == kPocoRotation)

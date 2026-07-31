@@ -1,0 +1,9 @@
+{
+	"include": "./manifest_shape.json",
+	"modules": {
+		"piu/PortPath": "./piuPortPath"
+	},
+	"preload": [
+		"piu/PortPath"
+	]
+}
