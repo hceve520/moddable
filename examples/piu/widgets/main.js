@@ -54,7 +54,9 @@ const WidgetsApplication = Application.template($ => ({
 			style: titleStyle,
 			string: "Switch",
 		}),
-		Switch($.switch, {
+		Switch($, {
+			anchor: "SWITCH",
+			data: $.switch,
 			right: 20, top: 112,
 		}),
 		Label($, {
@@ -68,8 +70,9 @@ const WidgetsApplication = Application.template($ => ({
 			style: valueStyle,
 			string: String(Math.round($.slider.value)),
 		}),
-		Slider($.slider, {
+		Slider($, {
 			anchor: "SLIDER",
+			data: $.slider,
 			left: 20, right: 20, top: 188,
 		}),
 		Label($, {
@@ -77,8 +80,9 @@ const WidgetsApplication = Application.template($ => ({
 			style: titleStyle,
 			string: "Progress",
 		}),
-		ProgressBar($.progress, {
+		ProgressBar($, {
 			anchor: "PROGRESS",
+			data: $.progress,
 			left: 20, right: 20, top: 264,
 		}),
 		Label($, {

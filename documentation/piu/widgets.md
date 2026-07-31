@@ -44,16 +44,32 @@ On tap, the button bubbles `onButtonPressed` (or bubbles `container.name` when s
 
 Optional dictionary fields: `string`, `skin`, `style`.
 
+## Data and anchors
+
+Piu `anchor` properties are installed on the template's first argument. Pass the shared app model as that argument so anchors land on the model (`$.SLIDER`, `$.PROGRESS`, …). Pass per-control state with dictionary `data`:
+
+```javascript
+Slider($, {
+	anchor: "SLIDER",
+	data: $.slider,
+	left: 20, right: 20, top: 120,
+});
+```
+
+If `data` is omitted, the first argument is used as the behavior data (handy for single-control samples).
+
 ## Switch
 
 ```javascript
 const model = { value: true };
 new Switch(model, { right: 20, top: 80 });
+// or with shared anchors:
+// new Switch($, { anchor: "SWITCH", data: $.switch, right: 20, top: 80 });
 ```
 
 The behavior data object must provide a boolean `value`. Drag or tap toggles it and bubbles `onSwitchChanged` with the new value.
 
-Optional dictionary fields: `barSkin`, `buttonSkin`.
+Optional dictionary fields: `data`, `barSkin`, `buttonSkin`.
 
 ## Slider
 
@@ -69,7 +85,7 @@ Bubbles:
 
 `HorizontalSlider` is an alias of `Slider`.
 
-Optional dictionary fields: `trackSkin`, `fillSkin`, `thumbSkin`.
+Optional dictionary fields: `data`, `trackSkin`, `fillSkin`, `thumbSkin`.
 
 ## ProgressBar
 
@@ -81,7 +97,7 @@ model.value = 80;
 bar.delegate("onDataChanged");
 ```
 
-Optional dictionary fields: `trackSkin`, `fillSkin`.
+Optional dictionary fields: `data`, `trackSkin`, `fillSkin`.
 
 ## Theming
 
