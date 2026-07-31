@@ -105,6 +105,12 @@ export const widgetStyles = Object.freeze({
 
 // BUTTON
 
+function widgetData($, it, fallback) {
+	if (it && ("data" in it))
+		return it.data || fallback;
+	return ($ !== undefined) ? $ : fallback;
+}
+
 export class ButtonBehavior extends Behavior {
 	changeState(container, state) {
 		container.state = state;
@@ -153,7 +159,11 @@ export class ButtonBehavior extends Behavior {
 export const Button = Container.template(($, it = {}) => ({
 	height: 48,
 	active: true,
-	Behavior: ButtonBehavior,
+	Behavior: class extends ButtonBehavior {
+		onCreate(container) {
+			super.onCreate(container, widgetData($, it, null));
+		}
+	},
 	contents: [
 		RoundContent($, {
 			left: 0, right: 0, top: 0, bottom: 0,
@@ -217,7 +227,11 @@ export class ProgressBarBehavior extends Behavior {
 
 export const ProgressBar = Container.template(($, it = {}) => ({
 	height: 24,
-	Behavior: ProgressBarBehavior,
+	Behavior: class extends ProgressBarBehavior {
+		onCreate(container) {
+			super.onCreate(container, widgetData($, it, { min: 0, max: 100, value: 0 }));
+		}
+	},
 	contents: [
 		RoundContent($, {
 			left: 0, right: 0, height: 12, top: 6,
@@ -328,7 +342,11 @@ export const Switch = Container.template(($, it = {}) => ({
 	width: 52,
 	height: 32,
 	active: true,
-	Behavior: SwitchBehavior,
+	Behavior: class extends SwitchBehavior {
+		onCreate(container) {
+			super.onCreate(container, widgetData($, it, { value: false }));
+		}
+	},
 	contents: [
 		RoundContent($, {
 			left: 4, width: 44, top: 6, height: 20,
@@ -431,7 +449,11 @@ export class SliderBehavior extends Behavior {
 export const Slider = Container.template(($, it = {}) => ({
 	height: 36,
 	active: true,
-	Behavior: SliderBehavior,
+	Behavior: class extends SliderBehavior {
+		onCreate(container) {
+			super.onCreate(container, widgetData($, it, { min: 0, max: 100, value: 0 }));
+		}
+	},
 	contents: [
 		RoundContent($, {
 			left: 12, right: 12, top: 14, height: 8,
