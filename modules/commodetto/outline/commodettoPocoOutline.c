@@ -4,6 +4,8 @@
 
 #include "mc.defines.h"
 
+#include <math.h>
+
 #include "commodettoPoco.h"
 #include "commodettoPocoOutline.h"
 
@@ -76,14 +78,37 @@ void bufferToFTOutline(void *buffer, struct FT_Outline_ *outline)
 	outline->flags = header->flags;
 }
 
+#ifndef M_PI_F
+	#define M_PI_F 3.14159265f
+#endif
+
 void PocoLinearGradientPrepare(PocoLinearGradient gradient)
 {
+	gradient->len2Scale = 0;
+	gradient->invSweep = 0;
+
 	if (gradient->flags & kPocoGradientFlagAngular) {
+		float twoPi = 2.0f * M_PI_F;
+		float start = gradient->startAngle;
+		float sweep = gradient->sweepAngle;
+
 		gradient->adx = 0;
 		gradient->ady = 0;
 		gradient->len2 = 1;	/* non-zero so single-stop short-circuit still works via stopCount */
+
+		if (sweep < 0)
+			sweep = -sweep;
+		gradient->sweepAngle = sweep;
+
+		while (start < 0)
+			start += twoPi;
+		while (start >= twoPi)
+			start -= twoPi;
+		gradient->startAngle = start;
+		gradient->invSweep = (sweep > 0) ? (255.0f / sweep) : 0;
 		return;
 	}
+
 	gradient->adx = (int32_t)gradient->x1 - (int32_t)gradient->x0;
 	gradient->ady = (int32_t)gradient->y1 - (int32_t)gradient->y0;
 	gradient->len2 = (uint32_t)(gradient->adx * gradient->adx + gradient->ady * gradient->ady);
@@ -92,6 +117,8 @@ void PocoLinearGradientPrepare(PocoLinearGradient gradient)
 		gradient->flags |= kPocoGradientFlagVertical;
 	if (0 == gradient->ady)
 		gradient->flags |= kPocoGradientFlagHorizontal;
+	if (gradient->len2)
+		gradient->len2Scale = (uint32_t)(((uint64_t)255 << 24) / gradient->len2);
 }
 
 static void PocoGradientShadeFromT(const PocoLinearGradientRecord *gradient, uint32_t t, uint8_t *r, uint8_t *g, uint8_t *b)
@@ -127,62 +154,119 @@ static void PocoGradientShadeFromT(const PocoLinearGradientRecord *gradient, uin
 	*b = gradient->stops[i].b;
 }
 
-static void PocoLinearGradientSampleRGB(const PocoLinearGradientRecord *gradient, int x, int y, uint8_t *r, uint8_t *g, uint8_t *b)
+void PocoLinearGradientBuildLUT(const PocoLinearGradientRecord *gradient, PocoPixel *lut)
 {
 	uint32_t t;
 
 	if (0 == gradient->stopCount) {
-		*r = *g = *b = 0;
+		for (t = 0; t < 256; t++)
+			lut[t] = 0;
 		return;
 	}
 
+	if (1 == gradient->stopCount) {
+		PocoPixel color = PocoMakeColor((Poco)NULL, gradient->stops[0].r, gradient->stops[0].g, gradient->stops[0].b);
+		for (t = 0; t < 256; t++)
+			lut[t] = color;
+		return;
+	}
+
+	for (t = 0; t < 256; t++) {
+		uint8_t r, g, b;
+		PocoGradientShadeFromT(gradient, t, &r, &g, &b);
+		lut[t] = PocoMakeColor((Poco)NULL, r, g, b);
+	}
+}
+
+static uint32_t PocoLinearGradientTFromNum(const PocoLinearGradientRecord *gradient, int64_t num)
+{
+	uint32_t t;
+
+	if (num <= 0)
+		return 0;
+	if (num >= (int64_t)gradient->len2)
+		return 255;
+	if (!gradient->len2Scale)
+		return 0;
+	t = (uint32_t)(((uint64_t)num * gradient->len2Scale) >> 24);
+	return (t > 255) ? 255 : t;
+}
+
+/*
+	Compact atan2 approximation in float (good to ~0.01 rad).
+	Avoids double libm atan2 on targets where double is soft-float.
+*/
+static float pocoFastAtan2f(float y, float x)
+{
+	float absY, angle, r;
+
+	if ((0 == x) && (0 == y))
+		return 0;
+
+	absY = (y < 0) ? -y : y;
+	if (x >= 0) {
+		r = (x - absY) / (x + absY);
+		angle = 0.78539816f - 0.78539816f * r;	/* pi/4 */
+	}
+	else {
+		r = (x + absY) / (absY - x);
+		angle = 2.35619449f - 0.78539816f * r;	/* 3*pi/4 */
+	}
+	return (y < 0) ? -angle : angle;
+}
+
+uint8_t PocoLinearGradientSampleT(const PocoLinearGradientRecord *gradient, int x, int y)
+{
+	if (0 == gradient->stopCount)
+		return 0;
+	if (1 == gradient->stopCount)
+		return 0;
+
+	if (gradient->flags & kPocoGradientFlagAngular) {
+		float ang = pocoFastAtan2f((float)(y - gradient->y0), (float)(x - gradient->x0));
+		float rel = ang - gradient->startAngle;
+		float sweep = gradient->sweepAngle;
+		float twoPi = 2.0f * M_PI_F;
+		uint32_t t;
+
+		while (rel < 0)
+			rel += twoPi;
+		while (rel >= twoPi)
+			rel -= twoPi;
+		if (sweep <= 0)
+			t = 0;
+		else if (rel > sweep)
+			t = (rel - sweep < twoPi - rel) ? 255 : 0;
+		else {
+			t = (uint32_t)(rel * gradient->invSweep + 0.5f);
+			if (t > 255)
+				t = 255;
+		}
+		return (uint8_t)t;
+	}
+
+	if (0 == gradient->len2)
+		return 0;
+
+	return (uint8_t)PocoLinearGradientTFromNum(
+		gradient,
+		(int64_t)(x - gradient->x0) * gradient->adx + (int64_t)(y - gradient->y0) * gradient->ady
+	);
+}
+
+static void PocoLinearGradientSampleRGB(const PocoLinearGradientRecord *gradient, int x, int y, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+	if (0 == gradient->stopCount) {
+		*r = *g = *b = 0;
+		return;
+	}
 	if (1 == gradient->stopCount) {
 		*r = gradient->stops[0].r;
 		*g = gradient->stops[0].g;
 		*b = gradient->stops[0].b;
 		return;
 	}
-
-	if (gradient->flags & kPocoGradientFlagAngular) {
-		double ang = c_atan2((double)(y - gradient->y0), (double)(x - gradient->x0));
-		double rel = ang - (double)gradient->startAngle;
-		double sweep = (double)gradient->sweepAngle;
-		if (sweep < 0)
-			sweep = -sweep;
-		while (rel < 0)
-			rel += 2 * C_M_PI;
-		while (rel >= 2 * C_M_PI)
-			rel -= 2 * C_M_PI;
-		if (sweep <= 0)
-			t = 0;
-		else if (rel > sweep)
-			t = (rel - sweep < (2 * C_M_PI - rel)) ? 255 : 0;
-		else
-			t = (uint32_t)((rel / sweep) * 255.0 + 0.5);
-		if (t > 255)
-			t = 255;
-		PocoGradientShadeFromT(gradient, t, r, g, b);
-		return;
-	}
-
-	if (0 == gradient->len2) {
-		*r = gradient->stops[0].r;
-		*g = gradient->stops[0].g;
-		*b = gradient->stops[0].b;
-		return;
-	}
-
-	{
-		int64_t num = (int64_t)(x - gradient->x0) * gradient->adx + (int64_t)(y - gradient->y0) * gradient->ady;
-		if (num <= 0)
-			t = 0;
-		else if (num >= (int64_t)gradient->len2)
-			t = 255;
-		else
-			t = (uint32_t)((num * 255) / gradient->len2);
-	}
-
-	PocoGradientShadeFromT(gradient, t, r, g, b);
+	PocoGradientShadeFromT(gradient, PocoLinearGradientSampleT(gradient, x, y), r, g, b);
 }
 
 PocoPixel PocoLinearGradientSamplePixel(const PocoLinearGradientRecord *gradient, int x, int y)
@@ -416,11 +500,21 @@ typedef struct {
 	PocoPixel 		color;
 	uint8_t 		blend;
 	uint8_t			paintKind;
+	uint8_t			haveLut;
 	PocoLinearGradientRecord gradient;
+	PocoPixel		lut[256];		/* built once per band; not stored in display list */
 #if 4 == kPocoPixelSize
 	uint8_t 		xphase;
 #endif
 } xsOutlineSpanRecord, *xsOutlineSpan;
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
+static inline PocoPixel pocoGradColor(xsOutlineSpan os, int x, int y)
+{
+	return os->lut[PocoLinearGradientSampleT(&os->gradient, x, y)];
+}
 
 void doOutline(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, PocoDimension h, uint8_t xphase)
 {
@@ -435,8 +529,12 @@ void doOutline(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	os.color = orr->color;
 	os.blend = orr->blend;
 	os.paintKind = orr->paintKind;
-	if (kPocoPaintLinearGradient == orr->paintKind)
+	os.haveLut = 0;
+	if (kPocoPaintLinearGradient == orr->paintKind) {
 		os.gradient = orr->gradient;
+		PocoLinearGradientBuildLUT(&os.gradient, os.lut);
+		os.haveLut = 1;
+	}
 #if 4 == kPocoPixelSize
 	os.xphase = xphase;
 #endif
@@ -568,6 +666,7 @@ void doPolygon(Poco poco, uint8_t *refcon, PocoPixel *dst, PocoDimension w, Poco
 	os.color = prr->color;
 	os.blend = prr->blend;
 	os.paintKind = kPocoPaintSolid;
+	os.haveLut = 0;
 #if 4 == kPocoPixelSize
 	os.xphase = xphase;
 #endif
@@ -619,22 +718,58 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
 
 	if (kPocoPaintLinearGradient == os->paintKind) {
+		const PocoLinearGradientRecord *g = &os->gradient;
+		uint8_t flags = g->flags;
 		PocoPixel rowColor = 0;
-		uint8_t haveRowColor = 0;
-		if (os->gradient.flags & kPocoGradientFlagVertical) {
-			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
-			haveRowColor = 1;
-		}
+		uint8_t haveRowColor = (flags & kPocoGradientFlagVertical) ? 1 : 0;
+		if (haveRowColor)
+			rowColor = os->lut[PocoLinearGradientSampleT(g, 0, y)];
 		pixels -= os->x;
 		do {
 			uint16_t len = spans->len;
 			int x = spans->x;
 			PocoPixel *p = pixels + x;
-			uint8_t blend = spans->coverage >> 3;
-			while (len--) {
-				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
-				blendPixelRGB565LE(p++, color, (255 == spans->coverage) ? 31 : blend);
-				x += 1;
+			uint8_t coverage = spans->coverage;
+			if (255 == coverage) {
+				if (haveRowColor) {
+					while (len--)
+						*p++ = rowColor;
+				}
+				else if (flags & kPocoGradientFlagAngular) {
+					while (len--) {
+						*p++ = os->lut[PocoLinearGradientSampleT(g, x, y)];
+						x += 1;
+					}
+				}
+				else {
+					int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+					while (len--) {
+						*p++ = os->lut[PocoLinearGradientTFromNum(g, num)];
+						num += g->adx;
+						x += 1;
+					}
+				}
+			}
+			else {
+				uint8_t blend = coverage >> 3;
+				if (haveRowColor) {
+					while (len--)
+						blendPixelRGB565LE(p++, rowColor, blend);
+				}
+				else if (flags & kPocoGradientFlagAngular) {
+					while (len--) {
+						blendPixelRGB565LE(p++, os->lut[PocoLinearGradientSampleT(g, x, y)], blend);
+						x += 1;
+					}
+				}
+				else {
+					int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+					while (len--) {
+						blendPixelRGB565LE(p++, os->lut[PocoLinearGradientTFromNum(g, num)], blend);
+						num += g->adx;
+						x += 1;
+					}
+				}
 			}
 			spans++;
 		} while (--count);
@@ -715,22 +850,58 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
 
 	if (kPocoPaintLinearGradient == os->paintKind) {
+		const PocoLinearGradientRecord *g = &os->gradient;
+		uint8_t flags = g->flags;
 		PocoPixel rowColor = 0;
-		uint8_t haveRowColor = 0;
-		if (os->gradient.flags & kPocoGradientFlagVertical) {
-			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
-			haveRowColor = 1;
-		}
+		uint8_t haveRowColor = (flags & kPocoGradientFlagVertical) ? 1 : 0;
+		if (haveRowColor)
+			rowColor = os->lut[PocoLinearGradientSampleT(g, 0, y)];
 		pixels -= os->x;
 		do {
 			uint16_t len = spans->len;
 			int x = spans->x;
 			PocoPixel *p = pixels + x;
-			uint8_t blend = spans->coverage >> 3;
-			while (len--) {
-				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
-				blendPixelRGB565BE(p++, color, (255 == spans->coverage) ? 31 : blend);
-				x += 1;
+			uint8_t coverage = spans->coverage;
+			if (255 == coverage) {
+				if (haveRowColor) {
+					while (len--)
+						*p++ = rowColor;
+				}
+				else if (flags & kPocoGradientFlagAngular) {
+					while (len--) {
+						*p++ = os->lut[PocoLinearGradientSampleT(g, x, y)];
+						x += 1;
+					}
+				}
+				else {
+					int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+					while (len--) {
+						*p++ = os->lut[PocoLinearGradientTFromNum(g, num)];
+						num += g->adx;
+						x += 1;
+					}
+				}
+			}
+			else {
+				uint8_t blend = coverage >> 3;
+				if (haveRowColor) {
+					while (len--)
+						blendPixelRGB565BE(p++, rowColor, blend);
+				}
+				else if (flags & kPocoGradientFlagAngular) {
+					while (len--) {
+						blendPixelRGB565BE(p++, os->lut[PocoLinearGradientSampleT(g, x, y)], blend);
+						x += 1;
+					}
+				}
+				else {
+					int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+					while (len--) {
+						blendPixelRGB565BE(p++, os->lut[PocoLinearGradientTFromNum(g, num)], blend);
+						num += g->adx;
+						x += 1;
+					}
+				}
 			}
 			spans++;
 		} while (--count);
@@ -799,7 +970,7 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 		while (len--) {
 			uint8_t color = os->color;
 			if (kPocoPaintLinearGradient == os->paintKind)
-				color = (uint8_t)PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				color = (uint8_t)pocoGradColor(os, x, y);
 			if (255 == c) {
 				uint8_t pixel = *p;
 				if (xphase) {
@@ -853,7 +1024,7 @@ void doOutlineOpaqueSpan(int y, int count, const FT_Span *spans, void *user)
 		while (len--) {
 			PocoPixel color = os->color;
 			if (kPocoPaintLinearGradient == os->paintKind)
-				color = PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				color = pocoGradColor(os, x, y);
 			if (31 == blend)
 				*p++ = color;
 			else {
@@ -880,22 +1051,35 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
 
 	if (kPocoPaintLinearGradient == os->paintKind) {
+		const PocoLinearGradientRecord *g = &os->gradient;
+		uint8_t flags = g->flags;
 		PocoPixel rowColor = 0;
-		uint8_t haveRowColor = 0;
-		if (os->gradient.flags & kPocoGradientFlagVertical) {
-			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
-			haveRowColor = 1;
-		}
+		uint8_t haveRowColor = (flags & kPocoGradientFlagVertical) ? 1 : 0;
+		if (haveRowColor)
+			rowColor = os->lut[PocoLinearGradientSampleT(g, 0, y)];
 		pixels -= os->x;
 		do {
 			uint16_t len = spans->len;
 			int x = spans->x;
 			PocoPixel *p = pixels + x;
 			uint8_t blend = (spans->coverage * os->blend) >> 11;
-			while (len--) {
-				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
-				blendPixelRGB565LE(p++, color, blend);
-				x += 1;
+			if (haveRowColor) {
+				while (len--)
+					blendPixelRGB565LE(p++, rowColor, blend);
+			}
+			else if (flags & kPocoGradientFlagAngular) {
+				while (len--) {
+					blendPixelRGB565LE(p++, os->lut[PocoLinearGradientSampleT(g, x, y)], blend);
+					x += 1;
+				}
+			}
+			else {
+				int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+				while (len--) {
+					blendPixelRGB565LE(p++, os->lut[PocoLinearGradientTFromNum(g, num)], blend);
+					num += g->adx;
+					x += 1;
+				}
 			}
 			spans++;
 		} while (--count);
@@ -942,22 +1126,35 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 	PocoPixel *pixels = (PocoPixel *)(((uint8_t *)os->dst) + ((y - os->y) * os->rowBytes));
 
 	if (kPocoPaintLinearGradient == os->paintKind) {
+		const PocoLinearGradientRecord *g = &os->gradient;
+		uint8_t flags = g->flags;
 		PocoPixel rowColor = 0;
-		uint8_t haveRowColor = 0;
-		if (os->gradient.flags & kPocoGradientFlagVertical) {
-			rowColor = PocoLinearGradientSamplePixel(&os->gradient, 0, y);
-			haveRowColor = 1;
-		}
+		uint8_t haveRowColor = (flags & kPocoGradientFlagVertical) ? 1 : 0;
+		if (haveRowColor)
+			rowColor = os->lut[PocoLinearGradientSampleT(g, 0, y)];
 		pixels -= os->x;
 		do {
 			uint16_t len = spans->len;
 			int x = spans->x;
 			PocoPixel *p = pixels + x;
 			uint8_t blend = (spans->coverage * os->blend) >> 11;
-			while (len--) {
-				PocoPixel color = haveRowColor ? rowColor : PocoLinearGradientSamplePixel(&os->gradient, x, y);
-				blendPixelRGB565BE(p++, color, blend);
-				x += 1;
+			if (haveRowColor) {
+				while (len--)
+					blendPixelRGB565BE(p++, rowColor, blend);
+			}
+			else if (flags & kPocoGradientFlagAngular) {
+				while (len--) {
+					blendPixelRGB565BE(p++, os->lut[PocoLinearGradientSampleT(g, x, y)], blend);
+					x += 1;
+				}
+			}
+			else {
+				int64_t num = (int64_t)(x - g->x0) * g->adx + (int64_t)(y - g->y0) * g->ady;
+				while (len--) {
+					blendPixelRGB565BE(p++, os->lut[PocoLinearGradientTFromNum(g, num)], blend);
+					num += g->adx;
+					x += 1;
+				}
 			}
 			spans++;
 		} while (--count);
@@ -1017,7 +1214,7 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 		while (len--) {
 			uint8_t color = os->color;
 			if (kPocoPaintLinearGradient == os->paintKind)
-				color = (uint8_t)PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				color = (uint8_t)pocoGradColor(os, x, y);
 			{
 				uint8_t pixel = *p;
 				uint16_t accum;
@@ -1062,7 +1259,7 @@ void doOutlineBlendSpan(int y, int count, const FT_Span *spans, void *user)
 		while (len--) {
 			PocoPixel color = os->color;
 			if (kPocoPaintLinearGradient == os->paintKind)
-				color = PocoLinearGradientSamplePixel(&os->gradient, x, y);
+				color = pocoGradColor(os, x, y);
 			{
 				uint16_t pixel = color * blend;
 				uint16_t t = (*p * (31 - blend)) + pixel;

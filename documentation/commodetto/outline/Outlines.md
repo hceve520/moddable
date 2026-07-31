@@ -222,12 +222,16 @@ The [Poco renderer](https://github.com/Moddable-OpenSource/moddable/blob/public/
 
 | Argument | Type | Description |
 | --- | --- | :--- |
-| `colorOrGradient` | number or object | a color from `Poco.prototype.makeColor`, or a linear gradient descriptor (see below) |
+| `colorOrGradient` | number or object | a color from `Poco.prototype.makeColor`, or a linear / angular gradient descriptor (see below) |
 | `blend` | number | the level of blending, from a value of 0 for transparent to a value of 255 for opaque |
 | `outline` | number | the outline to render, an instance of `Outline.prototype` |
 | `x`, `y` | number | where to render the outline |
 
-A linear gradient descriptor is an object with `x0`, `y0`, `x1`, `y1` (in the same coordinate space as the outline path) and a `stops` array. Each stop is `{ offset, r, g, b }` with `offset` from 0 to 1, or `{ offset, color }` using a value from `makeColor`. Up to 8 stops are supported. Use `Poco.prototype.makeLinearGradient(x0, y0, x1, y1, stops)` to build the descriptor.
+A **linear** gradient descriptor is an object with `x0`, `y0`, `x1`, `y1` (in the same coordinate space as the outline path) and a `stops` array. Each stop is `{ offset, r, g, b }` with `offset` from 0 to 1, or `{ offset, color }` using a value from `makeColor`. Up to 8 stops are supported. Use `Poco.prototype.makeLinearGradient(x0, y0, x1, y1, stops)` to build the descriptor.
+
+An **angular** (conic) gradient — used by ring gauges — is an object with `type: "angular"` (or `"conic"`), `cx`, `cy`, `startAngle`, and either `sweepAngle` or `endAngle` (radians), plus `stops`. Use `Poco.prototype.makeAngularGradient(cx, cy, startAngle, sweepAngle, stops)`.
+
+Rendering builds a 256-entry color LUT once per draw band; vertical and horizontal linear gradients use scanline/span fast paths, and angular sampling uses a float `atan2` approximation instead of double `libm` `atan2`.
 
 ```javascript
 const path = Outline.RoundRectPath(0, 0, 200, 60, 15);
@@ -237,6 +241,15 @@ const gradient = poco.makeLinearGradient(0, 0, 0, 60, [
 	{ offset: 1, r: 0, g: 105, b: 217 },
 ]);
 poco.blendOutline(gradient, 255, outline, 20, 20);
+
+const ringPath = new Outline.CanvasPath();
+ringPath.arc(60, 60, 48, 0.6, Math.PI * 2 - 0.6);
+const ringOutline = Outline.stroke(ringPath, 12);
+const angular = poco.makeAngularGradient(60, 60, 0.6, Math.PI * 2 - 1.2, [
+	{ offset: 0, r: 91, g: 44, b: 255 },
+	{ offset: 1, r: 255, g: 45, b: 149 },
+]);
+poco.blendOutline(angular, 255, ringOutline, 20, 20);
 ```
 
 #### `Poco.prototype.blendPolygon(color, blend, x0, y0, x1, y1 /* etc */)`
