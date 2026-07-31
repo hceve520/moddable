@@ -7,16 +7,19 @@ import { PathPort } from "piu/PortPath";
 const backgroundSkin = new Skin({ fill: "#102027" });
 
 class PathPortBehavior extends Behavior {
-	onDisplaying(port) {
+	onCreate(port) {
 		port.duration = 4000;
 		port.loop = true;
+	}
+	onDisplaying(port) {
 		port.time = 0;
 		port.start();
 	}
 	onDraw(port, x, y, w, h) {
 		const cx = port.width >> 1;
 		const cy = 120;
-		const t = Math.max(0.02, port.fraction * Math.PI * 2);
+		const fraction = port.fraction || 0;
+		const t = Math.max(0.02, fraction * Math.PI * 2);
 
 		port.fillColor("#102027", x, y, w, h);
 

@@ -26,6 +26,8 @@ struct PiuPortOutlineOpStruct {
 	xsSlot* reference;
 	xsSlot* outline;
 	xsSlot* gradient;
+	PocoOutline outlineData;
+	PocoLinearGradientRecord gradientData;
 	PocoColor color;
 	uint8_t blend;
 	uint8_t kind;
@@ -57,20 +59,15 @@ static void PiuPortOutlineOpMark(xsMachine* the, void* it, xsMarkRoot markRoot)
 static void PiuPortOutlineOpDrawAux(void* it, PiuView* view, PiuCoordinate x, PiuCoordinate y, PiuDimension sw, PiuDimension sh)
 {
 	PiuPortOutlineOp* self = it;
-	PocoOutline outline;
+	PocoOutline outline = (*self)->outlineData;
 
-	xsBeginHost((*view)->the);
-	xsResult = xsReference((*self)->outline);
-	outline = xsGetHostDataValidate(xsResult, xs_outline_destructor);
-	if ((*self)->kind == kPiuPortOutlineGradient) {
-		PocoLinearGradientRecord gradient;
-		xsResult = xsReference((*self)->gradient);
-		PocoLinearGradientFromSlot((*view)->the, &xsResult, &gradient);
-		PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->blend, outline, x, y);
-	}
+	if (!outline)
+		return;
+
+	if ((*self)->kind == kPiuPortOutlineGradient)
+		PocoOutlineFillGradient((*view)->poco, &(*self)->gradientData, (*self)->blend, outline, x, y);
 	else
 		PocoOutlineFill((*view)->poco, (*self)->color, (*self)->blend, outline, x, y);
-	xsEndHost((*view)->the);
 }
 
 void PiuPort_drawOutline(xsMachine* the)
@@ -82,11 +79,16 @@ void PiuPort_drawOutline(xsMachine* the)
 	PiuCoordinate x = 0, y = 0;
 	uint8_t blend = 255;
 	xsType paintType;
+	PocoOutline outlineData;
 
 	if (!view)
 		xsUnknownError("out of sequence");
 	if (c < 3)
 		xsUnknownError("drawOutline(paint, blend, outline)");
+
+	outlineData = xsGetHostDataIf(xsArg(2));
+	if (!outlineData)
+		xsUnknownError("drawOutline: outline required");
 
 	xsVars(1);
 	xsVar(0) = xsNewHostObject(NULL);
@@ -95,10 +97,12 @@ void PiuPort_drawOutline(xsMachine* the)
 	(*op)->reference = xsToReference(xsVar(0));
 	xsSetHostHooks(xsVar(0), (xsHostHooks*)&PiuPortOutlineOpHooks);
 	(*op)->outline = xsToReference(xsArg(2));
+	(*op)->outlineData = outlineData;
 	(*op)->gradient = NULL;
 	(*op)->color = 0;
 	(*op)->blend = 255;
 	(*op)->kind = kPiuPortOutlineSolid;
+	c_memset(&(*op)->gradientData, 0, sizeof((*op)->gradientData));
 
 	if (c > 1)
 		blend = (uint8_t)xsToInteger(xsArg(1));
@@ -120,6 +124,7 @@ void PiuPort_drawOutline(xsMachine* the)
 		(*op)->kind = kPiuPortOutlineGradient;
 		(*op)->gradient = xsToReference(xsArg(0));
 		(*op)->blend = blend;
+		PocoLinearGradientFromSlot(the, &xsArg(0), &(*op)->gradientData);
 	}
 
 	if (c > 3)

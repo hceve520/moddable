@@ -113,46 +113,42 @@ const pathPort = {
 		const canvas = state(this);
 		if (!canvas.path)
 			return this;
-		this.drawOutline(canvas.fillStyle, canvas.blend, Outline.fill(canvas.path, rule));
+		const outline = Outline.fill(canvas.path, rule);
+		if (outline)
+			this.drawOutline(canvas.fillStyle, canvas.blend, outline);
 		return this;
 	},
 	stroke(weight, cap, join) {
 		const canvas = state(this);
 		if (!canvas.path)
 			return this;
-		this.drawOutline(
-			canvas.strokeStyle,
-			canvas.blend,
-			Outline.stroke(
-				canvas.path,
-				(weight !== undefined) ? weight : canvas.lineWidth,
-				(cap !== undefined) ? cap : canvas.lineCap,
-				(join !== undefined) ? join : canvas.lineJoin
-			)
+		const outline = Outline.stroke(
+			canvas.path,
+			(weight !== undefined) ? weight : canvas.lineWidth,
+			(cap !== undefined) ? cap : canvas.lineCap,
+			(join !== undefined) ? join : canvas.lineJoin
 		);
+		if (outline)
+			this.drawOutline(canvas.strokeStyle, canvas.blend, outline);
 		return this;
 	},
 
 	fillRoundRect(color, x, y, w, h, r, blend) {
-		this.drawOutline(
-			color,
-			(blend !== undefined) ? blend : state(this).blend,
-			Outline.fill(Outline.RoundRectPath(x, y, w, h, r))
-		);
+		const outline = Outline.fill(Outline.RoundRectPath(x, y, w, h, r));
+		if (outline)
+			this.drawOutline(color, (blend !== undefined) ? blend : state(this).blend, outline);
 		return this;
 	},
 	strokeRoundRect(color, x, y, w, h, r, weight, blend) {
 		const canvas = state(this);
-		this.drawOutline(
-			color,
-			(blend !== undefined) ? blend : canvas.blend,
-			Outline.stroke(
-				Outline.RoundRectPath(x, y, w, h, r),
-				(weight !== undefined) ? weight : canvas.lineWidth,
-				canvas.lineCap,
-				canvas.lineJoin
-			)
+		const outline = Outline.stroke(
+			Outline.RoundRectPath(x, y, w, h, r),
+			(weight !== undefined) ? weight : canvas.lineWidth,
+			canvas.lineCap,
+			canvas.lineJoin
 		);
+		if (outline)
+			this.drawOutline(color, (blend !== undefined) ? blend : canvas.blend, outline);
 		return this;
 	},
 };
