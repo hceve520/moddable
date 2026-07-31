@@ -32,7 +32,8 @@ enum {
 enum {
 	kPocoGradientFlagVertical = 1 << 0,
 	kPocoGradientFlagHorizontal = 1 << 1,
-	kPocoGradientFlagAngular = 1 << 2
+	kPocoGradientFlagAngular = 1 << 2,
+	kPocoGradientFlagAngularFast = 1 << 3	/* octant-quantized angular sample */
 };
 
 #define kPocoLinearGradientMaxStops (8)
@@ -54,9 +55,9 @@ typedef struct {
 	int32_t ady;
 	uint32_t len2;
 	uint32_t len2Scale;		/* (255 << 24) / len2 — maps num→t without division */
-	float startAngle;		/* angular: radians */
-	float sweepAngle;		/* angular: radians, same direction as CanvasPath.arc */
-	float invSweep;			/* angular: 255 / |sweepAngle| */
+	uint32_t startTurn;		/* angular: [0, 65536) ≡ [0, 2π) */
+	uint32_t sweepTurn;		/* angular: sweep magnitude in turn units */
+	uint32_t invSweepScale;		/* angular: (255 << 16) / sweepTurn */
 } PocoLinearGradientRecord;
 typedef PocoLinearGradientRecord *PocoLinearGradient;
 
@@ -67,6 +68,10 @@ extern PocoPixel PocoLinearGradientSamplePixel(const PocoLinearGradientRecord *g
 
 extern void PocoOutlineFill(Poco poco, PocoColor color, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy);
 extern void PocoOutlineFillGradient(Poco poco, const PocoLinearGradientRecord *gradient, uint8_t blend, PocoOutline pOutline, PocoCoordinate dx, PocoCoordinate dy);
+
+/* Optional debug counters for dense Outline UIs (fills / gradient slots). */
+extern void PocoOutlineStatsGet(uint32_t *fills, uint32_t *gradients, uint32_t *slotsUsed, uint32_t *slotsPeak);
+extern void PocoOutlineStatsReset(void);
 
 extern void PocoOutlineCalculateCBox(PocoOutline pOutline);
 #if (90 == kPocoRotation) || (180 == kPocoRotation) || (270 == kPocoRotation)

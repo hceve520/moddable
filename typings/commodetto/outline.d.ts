@@ -119,14 +119,24 @@ declare module "commodetto/Poco" {
     sweepAngle?: number
     endAngle?: number
     stops: Array<LinearGradientStop>
+    fast?: boolean
   }
 
   type OutlineGradient = LinearGradient | AngularGradient
+
+  interface OutlineStats {
+    fills: number
+    gradients: number
+    slotsUsed: number
+    slotsPeak: number
+  }
 
   interface PocoPrototype {
     blendOutline(colorOrGradient: number | OutlineGradient, blend: number, outline: Outline, x?: number, y?: number): void
     blendPolygon(color: number, blend: number, ...points: Array<number>): void
     makeLinearGradient(x0: number, y0: number, x1: number, y1: number, stops: Array<LinearGradientStop>): LinearGradient
-    makeAngularGradient(cx: number, cy: number, startAngle: number, sweepAngle: number, stops: Array<LinearGradientStop>): AngularGradient
+    makeAngularGradient(cx: number, cy: number, startAngle: number, sweepAngle: number, stops: Array<LinearGradientStop>, fast?: boolean): AngularGradient
+    getOutlineStats(): OutlineStats
+    resetOutlineStats(): void
   }
 }
