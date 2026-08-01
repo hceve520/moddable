@@ -233,6 +233,8 @@ An **angular** (conic) gradient — used by ring gauges — is an object with `t
 
 Rendering builds a 256-entry color LUT once per draw band; vertical and horizontal linear gradients use scanline/span fast paths. Angular sampling uses fixed-point turn arithmetic (no per-pixel soft-float `atan2`). Gradient descriptors are stored in a per-frame slot table on the Outline renderer; each display-list command keeps only a slot index, so many gradient Outlines fit in a modest `displayListLength`.
 
+When Poco is built with `rotation` 90/180/270, gradient endpoints and angular centers are transformed with the outline into physical scan space (same mapping as `PocoOutlineRotate`). Applications still specify gradient coordinates in logical outline space.
+
 Use `poco.getOutlineStats()` / `poco.resetOutlineStats()` while tuning dense UIs (`fills`, `gradients`, `slotsUsed`, `slotsPeak`).
 
 ```javascript
