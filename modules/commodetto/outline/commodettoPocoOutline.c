@@ -220,6 +220,50 @@ void PocoLinearGradientPrepare(PocoLinearGradient gradient)
 		gradient->len2Scale = (uint32_t)(((uint64_t)255 << 24) / gradient->len2);
 }
 
+/*
+	Map gradient endpoints / angular center into the same space as PocoOutlineRotate.
+	Without this, rotation 90/180/270 leaves paints in logical space while spans are
+	physical — linear fills look solid and angular rings collapse to hard half-disks.
+*/
+static void PocoLinearGradientRotateToPoco(PocoLinearGradient gradient, int width, int height)
+{
+#if 0 == kPocoRotation
+	(void)gradient;
+	(void)width;
+	(void)height;
+#else
+	int16_t x0 = gradient->x0;
+	int16_t y0 = gradient->y0;
+	int16_t x1 = gradient->x1;
+	int16_t y1 = gradient->y1;
+
+	#if (90 == kPocoRotation)
+		gradient->x0 = (int16_t)(height - y0);
+		gradient->y0 = x0;
+		gradient->x1 = (int16_t)(height - y1);
+		gradient->y1 = x1;
+		if (gradient->flags & kPocoGradientFlagAngular)
+			gradient->startTurn = (gradient->startTurn + 16384u) & (kPocoOutlineTurnFull - 1);
+	#elif (180 == kPocoRotation)
+		gradient->x0 = (int16_t)(width - x0);
+		gradient->y0 = (int16_t)(height - y0);
+		gradient->x1 = (int16_t)(width - x1);
+		gradient->y1 = (int16_t)(height - y1);
+		if (gradient->flags & kPocoGradientFlagAngular)
+			gradient->startTurn = (gradient->startTurn + 32768u) & (kPocoOutlineTurnFull - 1);
+	#else /* 270 */
+		gradient->x0 = y0;
+		gradient->y0 = (int16_t)(width - x0);
+		gradient->x1 = y1;
+		gradient->y1 = (int16_t)(width - x1);
+		if (gradient->flags & kPocoGradientFlagAngular)
+			gradient->startTurn = (gradient->startTurn + 49152u) & (kPocoOutlineTurnFull - 1);
+	#endif
+
+	PocoLinearGradientPrepare(gradient);
+#endif
+}
+
 static void PocoAngularSetAngles(PocoLinearGradient gradient, float start, float sweep)
 {
 	float twoPi = 2.0f * M_PI_F;
@@ -598,6 +642,7 @@ void xs_outlinerenderer_blendOutline(xsMachine *the)
 		orr.paintKind = kPocoPaintLinearGradient;
 		orr.color = 0;
 		PocoLinearGradientFromSlot(the, &xsArg(0), &gradient);
+		PocoLinearGradientRotateToPoco(&gradient, poco->width, poco->height);
 		orr.gradientSlot = outlineAllocGradientSlot(poco, or, &gradient);
 		gOutlineGradientCount += 1;
 	}
@@ -1488,7 +1533,9 @@ static void outlineFillCommon(Poco poco, uint8_t paintKind, PocoColor color, con
 	orr.blend = blend;
 	orr.gradientSlot = 0;
 	if (kPocoPaintLinearGradient == paintKind) {
-		orr.gradientSlot = outlineAllocGradientSlot(poco, orr.or, gradient);
+		PocoLinearGradientRecord rotated = *gradient;
+		PocoLinearGradientRotateToPoco(&rotated, poco->width, poco->height);
+		orr.gradientSlot = outlineAllocGradientSlot(poco, orr.or, &rotated);
 		gOutlineGradientCount += 1;
 	}
 	gOutlineFillCount += 1;
