@@ -108,6 +108,12 @@ void PocoOutlineStatsReset(void)
 /*
 	Reset gradient slots when the display list is rewound (new PocoDrawingBegin)
 	or when the Poco instance / list buffer identity changes.
+
+	On rewind, gradHighWater must be cleared together with gradientSlotCount.
+	Otherwise next < oldHighWater stays true while the new frame's display list
+	grows from the start, and every alloc looks like a rewind — all commands
+	collapse onto slot 0 (last writer wins). That shows up as the first ring
+	gauge picking up a later gauge's colors during full-frame scroll redraws.
 */
 static void outlineSyncGradientFrame(Poco poco, xsOutlineRenderer or)
 {
@@ -121,8 +127,12 @@ static void outlineSyncGradientFrame(Poco poco, xsOutlineRenderer or)
 		return;
 	}
 
-	if ((NULL != or->gradHighWater) && ((next < or->gradHighWater) || (next == poco->displayList)))
+	/* PocoDrawingBegin sets next back to displayList; also handle a true backward move. */
+	if ((next == poco->displayList) || ((NULL != or->gradHighWater) && (next < or->gradHighWater))) {
 		or->gradientSlotCount = 0;
+		or->gradHighWater = next;
+		return;
+	}
 
 	if (next > or->gradHighWater)
 		or->gradHighWater = next;
