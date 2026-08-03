@@ -153,26 +153,44 @@ static void PiuRoundContentEnsureOutlines(PiuRoundContent* self)
 	(*self)->cacheBorder = 0;
 
 	xsBeginHost(the);
-	xsVars(3);
+	xsVars(5);
 	xsVar(0) = xsGet(xsGlobal, xsID_Shape);
 	xsVar(1) = xsGet(xsVar(0), xsID_Outline);
 
-	xsResult = xsCall5(xsVar(1), xsID_RoundRectPath,
-			xsInteger(0), xsInteger(0), xsInteger(width), xsInteger(height), xsInteger(radius));
-	xsVar(2) = xsCall1(xsVar(1), xsID_fill, xsResult);
-	(*self)->outerOutline = xsToReference(xsVar(2));
-
+	/*
+	 * With a border:
+	 *   outerOutline = even-odd (outer − inner) annulus for the stroke color
+	 *   innerOutline = filled inner round-rect for optional fill color
+	 * Without a border:
+	 *   outerOutline = filled round-rect (legacy)
+	 *
+	 * When skin has stroke but no fill (fillBlend == 0), only the annulus is
+	 * drawn — a true hollow frame that reveals content underneath.
+	 */
 	if (border && (width > (PiuDimension)(border << 1)) && (height > (PiuDimension)(border << 1))) {
 		PiuDimension innerRadius = (radius > border) ? (PiuDimension)(radius - border) : 0;
-		xsResult = xsCall5(xsVar(1), xsID_RoundRectPath,
+
+		xsVar(2) = xsCall5(xsVar(1), xsID_RoundRectPath,
+				xsInteger(0), xsInteger(0), xsInteger(width), xsInteger(height), xsInteger(radius));
+		xsVar(3) = xsCall5(xsVar(1), xsID_RoundRectPath,
 				xsInteger(border), xsInteger(border),
 				xsInteger(width - (border << 1)), xsInteger(height - (border << 1)),
 				xsInteger(innerRadius));
-		xsVar(2) = xsCall1(xsVar(1), xsID_fill, xsResult);
-		(*self)->innerOutline = xsToReference(xsVar(2));
+		xsVar(4) = xsCall1(xsVar(2), xsID_concat, xsVar(3));
+		/* Outline.EVEN_ODD_RULE == 2 */
+		xsResult = xsCall2(xsVar(1), xsID_fill, xsVar(4), xsInteger(2));
+		(*self)->outerOutline = xsToReference(xsResult);
+
+		xsResult = xsCall1(xsVar(1), xsID_fill, xsVar(3));
+		(*self)->innerOutline = xsToReference(xsResult);
 	}
-	else
+	else {
+		xsResult = xsCall5(xsVar(1), xsID_RoundRectPath,
+				xsInteger(0), xsInteger(0), xsInteger(width), xsInteger(height), xsInteger(radius));
+		xsVar(2) = xsCall1(xsVar(1), xsID_fill, xsResult);
+		(*self)->outerOutline = xsToReference(xsVar(2));
 		(*self)->innerOutline = NULL;
+	}
 
 	xsEndHost(the);
 
@@ -261,28 +279,34 @@ void PiuRoundContentDrawAux(void* it, PiuView* view, PiuCoordinate x, PiuCoordin
 	PiuSkin* skin = (*self)->skin;
 
 	xsBeginHost((*self)->the);
-	if ((*self)->innerOutline && ((*self)->cacheBorder > 0) && (skin || strokeGradient)) {
-		xsResult = xsReference((*self)->outerOutline);
-		outline = xsGetHostData(xsResult);
-		if (strokeGradient) {
-			PocoLinearGradientRecord gradient;
-			xsResult = xsReference(strokeGradient);
-			PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
-			PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->strokeBlend, outline, x, y);
+	if ((*self)->innerOutline && ((*self)->cacheBorder > 0) && (skin || strokeGradient || fillGradient)) {
+		/* Annulus (even-odd) — hollow when fillBlend is 0 / no fillGradient */
+		if (skin || strokeGradient) {
+			xsResult = xsReference((*self)->outerOutline);
+			outline = xsGetHostData(xsResult);
+			if (strokeGradient) {
+				PocoLinearGradientRecord gradient;
+				xsResult = xsReference(strokeGradient);
+				PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
+				PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->strokeBlend, outline, x, y);
+			}
+			else if ((*self)->strokeBlend)
+				PocoOutlineFill((*view)->poco, (*self)->strokeColor, (*self)->strokeBlend, outline, x, y);
 		}
-		else if ((*self)->strokeBlend)
-			PocoOutlineFill((*view)->poco, (*self)->strokeColor, (*self)->strokeBlend, outline, x, y);
 
-		xsResult = xsReference((*self)->innerOutline);
-		outline = xsGetHostData(xsResult);
-		if (fillGradient) {
-			PocoLinearGradientRecord gradient;
-			xsResult = xsReference(fillGradient);
-			PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
-			PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->fillBlend, outline, x, y);
+		/* Optional opaque interior */
+		if (fillGradient || (skin && (*self)->fillBlend)) {
+			xsResult = xsReference((*self)->innerOutline);
+			outline = xsGetHostData(xsResult);
+			if (fillGradient) {
+				PocoLinearGradientRecord gradient;
+				xsResult = xsReference(fillGradient);
+				PocoLinearGradientFromSlot((*self)->the, &xsResult, &gradient);
+				PocoOutlineFillGradient((*view)->poco, &gradient, (*self)->fillBlend, outline, x, y);
+			}
+			else
+				PocoOutlineFill((*view)->poco, (*self)->fillColor, (*self)->fillBlend, outline, x, y);
 		}
-		else if (skin && (*self)->fillBlend)
-			PocoOutlineFill((*view)->poco, (*self)->fillColor, (*self)->fillBlend, outline, x, y);
 	}
 	else if ((*self)->outerOutline && (skin || fillGradient)) {
 		xsResult = xsReference((*self)->outerOutline);
