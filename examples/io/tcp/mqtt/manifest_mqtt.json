@@ -1,12 +1,13 @@
 {
 	"include": [
 		"$(MODDABLE)/modules/data/url/manifest.json",
-		"$(MODDABLE)/examples/io/tcp/mqttclient/manifest_mqttclient.json"
+		"$(MODDABLE)/examples/io/tcp/mqttsclient/manifest_mqttsclient.json"
 	],
 	"modules": {
 		"mqtt/js": "./mqtt"
 	},
 	"preload": [
 		"mqtt/js"
-	]
+	],
+	"mcpack": true
 }

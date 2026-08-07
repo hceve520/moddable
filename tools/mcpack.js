@@ -24,13 +24,9 @@ import { URL } from "url";
 const defaultConditions = ["moddable", "import"];
 
 const consoleGlobal = {
+	include: "$(MODDABLE)/modules/web/console/manifest.json",
 	snippet: `
-globalThis.console = Object.freeze({
-	log(...args) {
-		trace(...args);
-		trace("\\n");
-	}
-});
+import "web/console";
 `
 };
 const eventSourceGlobal = {
@@ -88,13 +84,10 @@ globalThis.TextEncoder = TextEncoder;
 `	
 };
 const timerGlobal = {
+	include: "$(MODDABLE)/modules/web/timers/manifest.json",
 	snippet: `
-import Timer from "timer";
-globalThis.clearImmediate = globalThis.clearInterval = globalThis.clearTimeout = function(id) { return Timer.clear(id) };
-globalThis.setImmediate = function(callback) { return Timer.set(callback) };
-globalThis.setInterval = function(callback, delay) { return Timer.repeat(callback, delay) };
-globalThis.setTimeout = function(callback, delay) { return Timer.set(callback, delay) };
-`	
+import "web/timers";
+`
 };
 const urlGlobal = {
 	include: "$(MODDABLE)/modules/data/url/manifest.json",
@@ -118,7 +111,111 @@ import Worker from "worker";
 globalThis.Worker = Worker;
 import {SharedWorker} from "worker";
 globalThis.SharedWorker = SharedWorker;
-`	
+`
+};
+const abortSignalGlobal = {
+	include: "$(MODDABLE)/modules/web/abortsignal/manifest.json",
+	snippet: `
+import { AbortSignal, AbortController } from "web/abortsignal";
+globalThis.AbortSignal = AbortSignal;
+globalThis.AbortController = AbortController;
+`
+};
+const domExceptionGlobal = {
+	include: "$(MODDABLE)/modules/web/domexception/manifest.json",
+	snippet: `
+import { DOMException } from "web/domexception";
+globalThis.DOMException = DOMException;
+`
+};
+const streamsGlobal = {
+	include: "$(MODDABLE)/modules/web/streams/all/manifest.json",
+	snippet: `
+import { ReadableStream, ReadableStreamDefaultReader, ReadableStreamBYOBReader, ReadableStreamDefaultController, ReadableByteStreamController, ReadableStreamBYOBRequest, WritableStream, WritableStreamDefaultWriter, WritableStreamDefaultController, TransformStream, TransformStreamDefaultController, ByteLengthQueuingStrategy, CountQueuingStrategy } from "web/streams";
+globalThis.ReadableStream = ReadableStream;
+globalThis.ReadableStreamDefaultReader = ReadableStreamDefaultReader;
+globalThis.ReadableStreamBYOBReader = ReadableStreamBYOBReader;
+globalThis.ReadableStreamDefaultController = ReadableStreamDefaultController;
+globalThis.ReadableByteStreamController = ReadableByteStreamController;
+globalThis.ReadableStreamBYOBRequest = ReadableStreamBYOBRequest;
+globalThis.WritableStream = WritableStream;
+globalThis.WritableStreamDefaultWriter = WritableStreamDefaultWriter;
+globalThis.WritableStreamDefaultController = WritableStreamDefaultController;
+globalThis.TransformStream = TransformStream;
+globalThis.TransformStreamDefaultController = TransformStreamDefaultController;
+globalThis.ByteLengthQueuingStrategy = ByteLengthQueuingStrategy;
+globalThis.CountQueuingStrategy = CountQueuingStrategy;
+`
+};
+const decompressionStreamGlobal = {
+	include: "$(MODDABLE)/modules/web/streams/decompression/manifest.json",
+	snippet: `
+import DecompressionStream from "web/decompressionstream";
+globalThis.DecompressionStream = DecompressionStream;
+`
+};
+const textDecoderStreamGlobal = {
+	include: "$(MODDABLE)/modules/web/streams/text/decoder/manifest.json",
+	snippet: `
+import TextDecoderStream from "web/textdecoderstream";
+globalThis.TextDecoderStream = TextDecoderStream;
+`
+};
+const textEncoderStreamGlobal = {
+	include: "$(MODDABLE)/modules/web/streams/text/encoder/manifest.json",
+	snippet: `
+import TextEncoderStream from "web/textencoderstream";
+globalThis.TextEncoderStream = TextEncoderStream;
+`
+};
+const webSocketStreamGlobal = {
+	include: "$(MODDABLE)/modules/web/streams/websocket/manifest.json",
+	snippet: `
+import WebSocketStream from "web/websocketstream";
+globalThis.WebSocketStream = WebSocketStream;
+`
+};
+
+const webSerialGlobal = {
+	include: "$(MODDABLE)/modules/web/serial/manifest.json",
+	snippet: `
+import { serial } from "web/serial";
+globalThis.navigator ??= {};
+globalThis.navigator.serial = serial;
+`
+};
+const webBluetoothGlobal = {
+	include: "$(MODDABLE)/modules/io/ble/web-bluetooth/manifest.json",
+	snippet: `
+import { bluetooth, BluetoothUUID } from "web-bluetooth";
+globalThis.navigator ??= {};
+globalThis.navigator.bluetooth = bluetooth;
+globalThis.BluetoothUUID = BluetoothUUID;
+`
+};
+const httpGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/httpclient/manifest_httpclient.json"
+};
+const httpsGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/httpsclient/manifest_httpsclient.json"
+};
+const wsGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/websocketclient/manifest_websocketclient.json"
+};
+const wssGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/websocketsclient/manifest_wssclient.json"
+};
+const mqttGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/mqttclient/manifest_mqttclient.json"
+};
+const mqttsGlobal = {
+	include: "$(MODDABLE)/examples/io/tcp/mqttsclient/manifest_mqttsclient.json"
+};
+const ntpGlobal = {
+	include: "$(MODDABLE)/examples/io/udp/ntp/manifest_ntp.json"
+};
+const dnssdGlobal = {
+	include: "$(MODDABLE)/modules/io/dnssd/manifest.json"
 };
 
 export default class extends TOOL {
@@ -142,7 +239,8 @@ export default class extends TOOL {
 			MODULES:this.modulesPath,
 			COMMODETTO:this.modulesPath + this.slash + "commodetto",
 		};
-		
+		this.mcpackDefault = true;
+
 		let name, path;
 		let argc = argv.length;
 		let argi = 1;
@@ -312,6 +410,36 @@ export default class extends TOOL {
 			"WebSocket": websocketGlobal,
 			"Worker": workerGlobal,
 			"SharedWorker": workerGlobal,
+			"AbortController": abortSignalGlobal,
+			"AbortSignal": abortSignalGlobal,
+			"DOMException": domExceptionGlobal,
+			"ReadableStream": streamsGlobal,
+			"ReadableStreamDefaultReader": streamsGlobal,
+			"ReadableStreamBYOBReader": streamsGlobal,
+			"ReadableStreamDefaultController": streamsGlobal,
+			"ReadableByteStreamController": streamsGlobal,
+			"ReadableStreamBYOBRequest": streamsGlobal,
+			"WritableStream": streamsGlobal,
+			"WritableStreamDefaultWriter": streamsGlobal,
+			"WritableStreamDefaultController": streamsGlobal,
+			"TransformStream": streamsGlobal,
+			"TransformStreamDefaultController": streamsGlobal,
+			"ByteLengthQueuingStrategy": streamsGlobal,
+			"CountQueuingStrategy": streamsGlobal,
+			"DecompressionStream": decompressionStreamGlobal,
+			"TextDecoderStream": textDecoderStreamGlobal,
+			"TextEncoderStream": textEncoderStreamGlobal,
+			"WebSocketStream": webSocketStreamGlobal,
+			"navigator.serial": webSerialGlobal,
+			"navigator.bluetooth": webBluetoothGlobal,
+			"device.network.http": httpGlobal,
+			"device.network.https": httpsGlobal,
+			"device.network.ws": wsGlobal,
+			"device.network.wss": wssGlobal,
+			"device.network.mqtt": mqttGlobal,
+			"device.network.mqtts": mqttsGlobal,
+			"device.network.ntp": ntpGlobal,
+			"device.network.dnssd": dnssdGlobal,
 		}
 		this.snippets = [];
 	}
@@ -392,6 +520,8 @@ export default class extends TOOL {
 				}
 			}
 			for (let string of infos.global) {
+				if (string.startsWith("globalThis."))
+					string = string.slice(11);
 				let global = this.globals[string];
 				if (global) {
 					let include = global.include;
@@ -1090,6 +1220,9 @@ export default class extends TOOL {
 		for (let base of bases)
 			this.parseManifest(base, base);
 		this.recurseDirectory(this.modulesPath, this.filterManifestFile, this.parseManifest);
+		this.mcpackDefault = false;
+		this.recurseDirectory(this.examplesPath, this.filterManifestFile, this.parseManifest);
+		this.mcpackDefault = true;
 		const builtins = this.getBuiltins(this.manifests);
 		this.currentDirectory = currentDirectory;
 		
@@ -1174,6 +1307,8 @@ export default class extends TOOL {
 		this.currentDirectory = parts.directory;
 		this.currentPath = path;
 		const manifest = this.readFileJSON(path);
+		if (!(manifest.mcpack ?? this.mcpackDefault))
+			return;
 		manifest.directory = parts.directory;
 		manifest.path = path;
 		manifest.from = from ?? path;

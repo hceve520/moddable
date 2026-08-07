@@ -36,6 +36,8 @@ class Serializer {
 		this.opcode = opcode;
 		if (dictionary.id)
 			this.id = dictionary.id;
+		if (dictionary.responseCode)
+			this.responseCode = dictionary.responseCode;
 	}
 	splitName(name) {
 		if (!name)
@@ -91,9 +93,9 @@ class Serializer {
 						}
 					}
 					else {
-						for (const [property, value] in data) {
+						for (const [property, value] of data) {
 							if (undefined === value) continue;
-							d += property.length + 1 + ArrayBuffer.fromString(value.toString()).byteLength + 1;
+							d += 1 + ArrayBuffer.fromString(property + "=").byteLength + txtValue(value).byteLength;
 						}
 					}
 					if (d) {
@@ -111,13 +113,16 @@ class Serializer {
 							}
 						}
 						else {
-							for (let [property, value] in data) {
+							for (let [property, value] of data) {
 								if (undefined === value) continue;
-								value = ArrayBuffer.fromString(property + "=" + value.toString());
-								binary[offset] = value.byteLength;
+								const key = new Uint8Array(ArrayBuffer.fromString(property + "="));
+								const bytes = txtValue(value);
+								binary[offset] = key.byteLength + bytes.byteLength;
 								offset += 1;
-								binary.set(new Uint8Array(value), offset);
-								offset += value.byteLength;
+								binary.set(key, offset);
+								offset += key.byteLength;
+								binary.set(bytes, offset);
+								offset += bytes.byteLength;
 							}
 						}
 						data = binary;
@@ -243,13 +248,23 @@ class Serializer {
 
 		const result = new Uint8Array(this.state.position);
 		const id = this.id ?? 0;
-		result.set(Uint8Array.of(id >> 8, id, this.opcode, 0, 0, sections[0].length, 0, sections[1].length, 0, sections[2].length, 0, sections[3].length), 0);		// header
+		result.set(Uint8Array.of(id >> 8, id, this.opcode, this.responseCode ?? 0, 0, sections[0].length, 0, sections[1].length, 0, sections[2].length, 0, sections[3].length), 0);		// header
 
 		this.state = {position: 12, nameOffsets: new Map, result};
 		this.writeSections();
 		delete this.state;
 		return result.buffer;
 	}
+}
+
+function txtValue(value) {
+	if ("string" === typeof value)
+		return new Uint8Array(ArrayBuffer.fromString(value));
+	if (value instanceof ArrayBuffer)
+		return new Uint8Array(value);
+	if (!ArrayBuffer.isView(value) || (value.BYTES_PER_ELEMENT > 1))
+		throw new TypeError("invalid TXT value");
+	return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
 }
 
 export default Serializer;

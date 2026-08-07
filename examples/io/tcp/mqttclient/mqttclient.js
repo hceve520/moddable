@@ -74,7 +74,7 @@ class MQTTClient {
 			port: options.port,
 			id: options.id ?? "",
 			clean: options.clean ?? true,
-			keepalive: options.keepAlive ?? options.keepalive ?? 0,		// for compatibilty. should eventually be removed
+			keepalive: options.keepAlive ?? 0,
 			/** @type {any[] & {timer?: Timer}} */
 			pending: []
 		};
@@ -101,7 +101,7 @@ class MQTTClient {
 					this.#socket = new options.socket.io({
 						...options.socket,
 						address,
-						host,
+						...(options.socket.tls && {tls: {host, ...options.socket.tls}}),
 						port: this.#options.port ?? 1883,
 						onReadable: count => this.#onReadable(count),
 						onWritable: count => this.#onWritable(count),
@@ -720,11 +720,13 @@ class MQTTClient {
 
 		const onControl = this.#options.onControl;
 		if (onControl) {
+			const operation = msg.operation;
+			delete msg.operation;
 			delete msg.length;
 			delete msg.flags;
 			delete msg.state;
 			delete msg.remaining;
-			onControl.call(this, msg);
+			onControl.call(this, operation, msg);
 		}
 
 		if ((MQTTClient.CONNACK === operation) && (this.#writable > Overhead))

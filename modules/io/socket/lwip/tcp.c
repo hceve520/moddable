@@ -127,7 +127,7 @@ void xs_tcp_constructor(xsMachine *the)
 		if (onError)
 			triggerable |= kTCPError;
 
-		if (xsmcGet(xsVar(0), xsArg(0), xsID_nodelay))
+		if (xsmcGet(xsVar(0), xsArg(0), xsID_noDelay))
 			nodelay = xsmcToBoolean(xsVar(0)) ? 2 : 1;
 
 		if (xsmcGet(xsVar(0), xsArg(0), xsID_from)) {
@@ -239,7 +239,12 @@ void xs_tcp_destructor(void *data)
 	if (!tcp) return;
 
 	if (tcp->skt) {
-		removeTCPCallbacks(tcp);
+		// Marshaled: TCP_EVENT_RECV reads pcb->recv and pcb->callback_arg at
+		// separate instants, so clearing the callbacks from the XS task can
+		// interleave with a dispatch already in progress on the tcpip task.
+		// Running the clears on the tcpip task itself closes that window.
+		tcp_clear_callbacks_safe(tcp->skt);
+		tcp->triggerable &= ~kTCPWritable;
 
 		tcp_close_safe(tcp->skt);
 	}
@@ -256,9 +261,14 @@ void xs_tcp_destructor(void *data)
 	modInstrumentationAdjust(NetworkSockets, -1);
 }
 
+// Plain stores, so only safe when called from the tcpip task itself, where no
+// callback dispatch can be concurrent: tcpError and the tcpReceive error path.
+// XS-task teardown (doClose, xs_tcp_destructor) must use the marshaled
+// tcp_clear_callbacks_safe instead.
 void removeTCPCallbacks(TCP tcp)
 {
 	if (tcp->skt) {
+		tcp_arg(tcp->skt, NULL);
 		tcp_recv(tcp->skt, NULL);
 		tcp_sent(tcp->skt, NULL);
 		tcp_err(tcp->skt, NULL);
@@ -273,7 +283,8 @@ void doClose(xsMachine *the, xsSlot *instance)
 	if (tcp && xsmcGetHostDataValidate(*instance, (void *)&xsTCPHooks)) {
 		tcp->ready = false;
 
-		removeTCPCallbacks(tcp);
+		if (tcp->skt)
+			tcp_clear_callbacks_safe(tcp->skt);		// marshaled; see xs_tcp_destructor
 		tcp->triggerable = 0;
 
 		xsmcSetHostData(*instance, NULL);
@@ -355,7 +366,9 @@ void xs_tcp_read(xsMachine *the)
 			buffer->fragment = fragment->next;
 			buffer->fragmentOffset = 0;
 			if (NULL == buffer->fragment) {
+				builtinCriticalSectionBegin();
 				tcp->buffers = buffer->next;
+				builtinCriticalSectionEnd();
 				tcp_recved_safe(tcp->skt, buffer->pb->tot_len);
 				pbuf_free_safe(buffer->pb);
 				c_free(buffer);
@@ -532,6 +545,9 @@ void tcpError(void *arg, err_t err)
 {
 	TCP tcp = arg;
 
+	if (NULL == tcp)		// callbacks cleared during teardown
+		return;
+
 	removeTCPCallbacks(tcp);
 	tcp->skt = NULL;		// "pcb is already freed when this callback is called"
 	if (kTCPError & tcp->triggerable)
@@ -542,6 +558,12 @@ err_t tcpReceive(void *arg, struct tcp_pcb *pcb, struct pbuf *pb, err_t err)
 {
 	TCP tcp = arg;
 	TCPBuffer buffer;
+
+	if (NULL == tcp) {		// callbacks cleared during teardown
+		if (pb)
+			pbuf_free(pb);
+		return ERR_OK;
+	}
 
 	if ((NULL == pb) || (ERR_OK != err)) {		//@@ when is err set here?
 		removeTCPCallbacks(tcp);
@@ -569,6 +591,10 @@ err_t tcpReceive(void *arg, struct tcp_pcb *pcb, struct pbuf *pb, err_t err)
 
 	modInstrumentationAdjust(NetworkBytesRead, buffer->bytes);
 
+	// xs_tcp_read pops and frees head nodes on the XS task while this runs
+	// on the lwIP task; guard the pointer surgery so the tail walk cannot
+	// traverse a node being detached and freed
+	builtinCriticalSectionBegin();
 	if (tcp->buffers) {
 		TCPBuffer walker;
 
@@ -578,6 +604,7 @@ err_t tcpReceive(void *arg, struct tcp_pcb *pcb, struct pbuf *pb, err_t err)
 	}
 	else
 		tcp->buffers = buffer;
+	builtinCriticalSectionEnd();
 
 	if (tcp->triggerable & kTCPReadable)
 		tcpTrigger(tcp, kTCPReadable);
@@ -587,6 +614,9 @@ err_t tcpReceive(void *arg, struct tcp_pcb *pcb, struct pbuf *pb, err_t err)
 
 err_t tcpSent(void *arg, struct tcp_pcb *pcb, u16_t len)
 {
+	if (NULL == arg)		// callbacks cleared during teardown
+		return ERR_OK;
+
 	tcpTrigger((TCP)arg, kTCPWritable);
 	return ERR_OK;
 }

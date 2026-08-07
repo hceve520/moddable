@@ -23,6 +23,8 @@
 #include "mc.xs.h"
 #include "builtinCommon.h"
 
+#if ! kCPUESP32P4
+
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "lwip/ip6_addr.h"
@@ -185,6 +187,17 @@ void xs_wifi419_close(xsMachine *the)
 		}
 	}
 
+	if (!gWiFiList && !wf->connected && !wf->connecting) {
+		wifi_mode_t mode;
+		if (ESP_OK == esp_wifi_get_mode(&mode)) {
+			if (WIFI_MODE_APSTA == mode)
+				esp_wifi_set_mode(WIFI_MODE_AP);
+			else if (WIFI_MODE_STA == mode)
+				esp_wifi_set_mode(WIFI_MODE_NULL);
+		}
+		gStation = C_NULL;
+	}
+
 	xs_wifi419_destructor(wf);
 	xsmcSetHostData(xsThis, C_NULL);
 	xsSetHostDestructor(xsThis, C_NULL);
@@ -197,6 +210,17 @@ static void initWiFi(void)
 	wifi_mode_t mode;
 	if (ESP_OK == esp_wifi_get_mode(&mode)) {
 		gStation = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+		if (!gStation)
+			gStation = esp_netif_create_default_wifi_sta();
+
+		wifi_mode_t newMode = mode;
+		if (WIFI_MODE_AP == mode)
+			newMode = WIFI_MODE_APSTA;
+		else if (WIFI_MODE_NULL == mode)
+			newMode = WIFI_MODE_STA;
+		if (newMode != mode)
+			esp_wifi_set_mode(newMode);
+
 		ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, doWiFiEvent, C_NULL));
 		ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, doIPEvent, C_NULL));
 		return;
@@ -609,3 +633,23 @@ void xs_wifi419_channel_get(xsMachine *the)
 
 	xsmcSetInteger(xsResult, info.primary);
 }
+
+#else
+
+void xs_wifi419_destructor(void *data) { }
+void xs_wifi419(xsMachine *the) { }
+void xs_wifi419_close(xsMachine *the) { }
+void xs_wifi419_scan(xsMachine *the) { }
+void xs_wifi419_connect(xsMachine *the) { }
+void xs_wifi419_disconnect(xsMachine *the) { }
+void xs_wifi419_configure(xsMachine *the) { }
+void xs_wifi419_connection_get(xsMachine *the) { }
+void xs_wifi419_address_get(xsMachine *the) { }
+void xs_wifi419_MAC_get(xsMachine *the) { }
+void xs_wifi419_SSID_get(xsMachine *the) { }
+void xs_wifi419_BSSID_get(xsMachine *the) { }
+void xs_wifi419_RSSI_get(xsMachine *the) { }
+void xs_wifi419_channel_get(xsMachine *the) { }
+
+#endif
+

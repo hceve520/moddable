@@ -1,4 +1,8 @@
 {
+	"include": [
+		"$(MODDABLE)/modules/io/manifest.json",
+		"$(MODDABLE)/examples/io/udp/dns/manifest_dns.json"
+	],
 	"modules": {
 		"embedded:network/ntp/client": "./ntp",
 		"ntp/config": "./config"
@@ -7,5 +11,6 @@
 	"preload": [
 		"embedded:network/ntp/client",
 		"ntp/config"
-	]
+	],
+	"mcpack": true
 }

@@ -85,11 +85,35 @@
 		"webstorage": [
 			"$(TYPINGS)/web/webstorage"
 		],
+		"web/abortsignal": [
+			"$(TYPINGS)/web/abortsignal"
+		],
+		"web/console": [
+			"$(TYPINGS)/web/console"
+		],
+		"web/decompressionstream": [
+			"$(TYPINGS)/web/decompressionstream"
+		],
 		"web/eventsource": [
 			"$(TYPINGS)/web/eventsource"
 		],
+		"web/streams": [
+			"$(TYPINGS)/web/streams"
+		],
+		"web/timer": [
+			"$(TYPINGS)/web/timers"
+		],
+		"web/textdecoderstream": [
+			"$(TYPINGS)/web/textdecoderstream"
+		],
+		"web/textencoderstream": [
+			"$(TYPINGS)/web/textencoderstream"
+		],
 		"web/websocket": [
 			"$(TYPINGS)/web/websocket"
+		],
+		"web/websocketstream": [
+			"$(TYPINGS)/web/websocketstream"
 		],
 		"worker": [
 			"$(TYPINGS)/web/worker"

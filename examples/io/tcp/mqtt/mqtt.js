@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2025  Moddable Tech, Inc.
+ * Copyright (c) 2021-2026  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -74,7 +74,7 @@ export class Client {
 		}
 		else
 			throw new URIError("only mqtt or mqtts");
-		let keepalive = 60_000;
+		let keepAlive = 60_000;
 		let id = "mqttxs_"  + Math.random().toString(16).substr(2, 8);
 		let user = undefined;
 		let password = undefined;
@@ -82,8 +82,8 @@ export class Client {
 		if (options) {
 			if ("clientId" in options)
 				id = options.clientId
-			if ("keepalive" in options)
-				keepalive = 1000 * options.keepalive
+			if ("keepAlive" in options)
+				keepAlive = 1000 * options.keepAlive
 			if ("password" in options)
 				password = options.password
 			if ("username" in options)
@@ -104,9 +104,9 @@ export class Client {
 		this.#options = {
 			...config,
 			host: url.hostname, port,
-			keepalive, id, user, password, will,
-			onControl: (msg) => {
-				if (msg.operation == device.network.mqtt.io.CONNACK) {
+			keepAlive, id, user, password, will,
+			onControl: (operation, msg) => {
+				if (operation == device.network.mqtt.io.CONNACK) {
 					this.#state = CONNECTED;
 					this.#wait = true;
 					this.#acks.forEach(ack => {
@@ -119,8 +119,9 @@ export class Client {
 				else {
 					let acks = this.#acks;
 					this.#acks = [];
+					msg.operation = operation;
 					acks = acks.filter(ack => {
-						if ((ack.operation == msg.operation) && (ack.id == msg.id)) {
+						if ((ack.operation == operation) && (ack.id == msg.id)) {
 							if (ack.operation == device.network.mqtt.io.PUBREC) {
 								ack.operation = device.network.mqtt.io.PUBCOMP;
 								delete ack.data;
@@ -171,6 +172,13 @@ export class Client {
 				else {
 					this.#moreMessage = null;
 					this.#moreTopic = null;
+
+					Object.defineProperty(message, "toString", {			// for compatibility with calls that expects this to be a Node Buffer
+						enumerable: true,
+						configurable: true,
+						value: toString
+					});
+
 					this.#eventListeners.message.forEach(listener => listener.call(null, topic, message));
 				}
 			},
@@ -570,6 +578,10 @@ export class Client {
 }
 Client.prototype.off = Client.prototype.removeEventListener;
 Client.prototype.on = Client.prototype.addEventListener;
+
+function toString() {
+	return String.fromArrayBuffer(this);
+}
 
 export function connect(url, options) {
 	return new Client(url, options);

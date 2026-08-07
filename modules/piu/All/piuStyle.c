@@ -240,8 +240,11 @@ void PiuStyleCreate(xsMachine* the)
 							state = 4;
 					}
 				}
-				if (state > 3)
+				if (state > 3) {
+					if ((c_strlen(buffer) + (size_t)(q - p)) >= sizeof(buffer))
+						xsRangeError("font family overflow");
 					c_strncat(buffer, p, q - p);
+				}
 				p = q;
 				state++;
 			}
@@ -461,7 +464,8 @@ void PiuStyleOverride(PiuStyle* self, PiuStyle* result)
 	else if (flags & piuStyleRelativeWeight) {
 		int16_t weight = (*result)->weight + (*self)->weight;
 		if (weight < 1) weight = 1;
-		else if (weight > 9) weight = 0;
+		else if (weight > 9) weight = 9;
+		(*result)->weight = weight;
 	}
 	if (flags & piuStyleHorizontal)
 		(*result)->horizontal = (*self)->horizontal;
@@ -659,7 +663,7 @@ void PiuStyle_get_weight(xsMachine* the)
 		xsResult = xsInteger((*self)->weight * 100);
 	}
 	else if ((*self)->flags & piuStyleRelativeWeight) {
-		if ((*self)->size < 0)
+		if ((*self)->weight < 0)
 			xsResult = xsStringX("lighter");
 		else
 			xsResult = xsStringX("bolder");
